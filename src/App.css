@@ -1,0 +1,30 @@
+/* =============================================================================
+ * GustoDulce — Retroalimentación táctil de los botones "Sucia-Friendly"
+ * Solo el estado activo (pulsación). Sin estilos estructurales.
+ * ============================================================================= */
+
+.btn-tactil {
+  transition:
+    transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 120ms ease,
+    box-shadow 120ms ease;
+  will-change: transform;
+}
+
+/* Hundimiento + brillo + halo de marca: confirma el toque aunque el dedo tape el botón */
+.btn-tactil:not(:disabled):active {
+  transform: scale(0.9);
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--color-dulce-400, #fb923c) 40%, transparent);
+  transition-duration: 60ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-tactil {
+    transition: none;
+  }
+
+  .btn-tactil:not(:disabled):active {
+    transform: none;
+  }
+}

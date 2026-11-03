@@ -1,102 +1,42 @@
 @import "tailwindcss";
 
-/* =============================================================================
- * GustoDulce — Tokens de diseño (Tailwind v4)
- * Cada --color-* genera utilidades automáticamente:
- *   --color-dulce-400  →  bg-dulce-400, text-dulce-400, ring-dulce-400 ...
- * ============================================================================= */
-@theme {
-  /* Marca: naranjas cálidos para acciones primarias (contraste ≥ 7:1 con texto slate-950) */
-  --color-dulce-50: #fff7ed;
-  --color-dulce-100: #ffedd5;
-  --color-dulce-200: #fed7aa;
-  --color-dulce-300: #fdba74;
-  --color-dulce-400: #fb923c;
-  --color-dulce-500: #f97316;
-  --color-dulce-600: #ea580c;
-  --color-dulce-700: #c2410c;
-
-  /* Pasteles de apoyo (proformas PDF, ilustraciones, estados vacíos) */
-  --color-pastel-crema: #fef3c7;
-  --color-pastel-rosa: #fbcfe8;
-  --color-pastel-menta: #bbf7d0;
-
-  /* Semáforo de caducidad: el amarillo es deliberadamente distinto del naranja de marca */
-  --color-semaforo-verde: #22c55e;
-  --color-semaforo-amarillo: #facc15;
-  --color-semaforo-rojo: #dc2626;
-
-  /* Fondo del modo cocina de alta visibilidad */
-  --color-cocina-fondo: #020617;
+/*
+ * GustoDulce — estilos globales.
+ * touch-action: manipulation elimina el zoom por doble toque (y su retardo de
+ * 300 ms) sin bloquear el pellizco, que se conserva por accesibilidad (WCAG 1.4.4).
+ */
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  background-color: var(--color-stone-50);
 }
 
-/* =============================================================================
- * Estilos globales "Sucia-Friendly" (experiencia de app nativa)
- * ============================================================================= */
-@layer base {
-  /*
-   * touch-action NO se hereda: por eso se aplica a todos los elementos.
-   * "manipulation" desactiva el zoom por doble toque y elimina el retardo
-   * del clic, pero conserva el desplazamiento con el dedo.
-   * (El zoom por pellizco se controla con la meta viewport de index.html.)
-   */
-  *,
-  *::before,
-  *::after {
-    touch-action: manipulation;
-    scrollbar-width: none; /* Firefox y estándar */
-    -ms-overflow-style: none; /* Edge heredado */
-  }
+*,
+*::before,
+*::after {
+  touch-action: manipulation;
+}
 
-  /* Chrome, Safari y WebView de Android */
-  *::-webkit-scrollbar {
-    display: none;
-    width: 0;
-    height: 0;
-  }
+body {
+  margin: 0;
+  background-color: var(--color-stone-50);
+  color: var(--color-stone-800);
+  font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
 
-  html {
-    -webkit-text-size-adjust: 100%;
-    text-size-adjust: 100%;
-    -webkit-tap-highlight-color: transparent;
-    overscroll-behavior: none; /* sin pull-to-refresh ni rebote accidental */
-    color-scheme: dark;
-    background-color: var(--color-cocina-fondo);
-  }
+button {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 
-  body {
-    margin: 0;
-    min-height: 100vh;
-    min-height: 100dvh;
-    overscroll-behavior: none;
-    background-color: var(--color-cocina-fondo);
-    color: #ffffff;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  /* En v4 los botones usan cursor por defecto: se restaura el puntero */
-  button {
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-  }
-
-  img,
-  svg {
-    -webkit-user-drag: none;
-    user-select: none;
-  }
-
-  /* Foco visible de alto contraste (teclado / lector de pantalla) */
-  :focus-visible {
-    outline: 4px solid var(--color-dulce-400);
-    outline-offset: 3px;
-  }
+/* Ocultar scrollbars sin perder el desplazamiento */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
 }

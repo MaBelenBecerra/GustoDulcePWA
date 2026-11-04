@@ -8,6 +8,7 @@
  *    pulsación sostenida para avanzar rápido sin repetir toques.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { PanelPruebaFEFO } from './dev/PanelPruebaFEFO';
 import {
   AlertTriangle,
   BookOpen,
@@ -921,6 +922,7 @@ export default function App() {
           </button>
         </div>
       )}
+      {import.meta.env.DEV && <PanelPruebaFEFO />}
     </div>
   );
 }

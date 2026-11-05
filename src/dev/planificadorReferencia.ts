@@ -1,15 +1,19 @@
 
 
-import { exito, fallo, type TomaLote } from '../domain/tipos';
-import type { PlanificadorSalida } from '../domain/puertos';
+import { exito, fallo } from '../domain/tipos';
+import type {
+  PlanInventario,
+  PlanificadorInventario,
+  TomaInventario,
+} from '../data/repositorios/InventarioRepositorioDexie';
 
-export const planificadorReferencia: PlanificadorSalida = (insumoId, cantidad, lotesFEFO) => {
+export const planificadorReferencia: PlanificadorInventario = (insumoId, cantidad, lotesFEFO) => {
   const disponible = lotesFEFO.reduce((s, l) => s + l.cantidadDisponible, 0);
   if (disponible < cantidad) {
     return fallo({ insumoId, requerido: cantidad, disponible, faltante: cantidad - disponible });
   }
 
-  const tomas: TomaLote[] = [];
+  const tomas: TomaInventario[] = [];
   let pendiente = cantidad;
   for (const lote of lotesFEFO) {
     if (pendiente <= 1e-9) break;
@@ -20,10 +24,11 @@ export const planificadorReferencia: PlanificadorSalida = (insumoId, cantidad, l
     pendiente -= x;
   }
 
-  return exito({
+  const plan: PlanInventario = {
     insumoId,
     cantidadSolicitada: cantidad,
     tomas,
     costoTotal: tomas.reduce((s, t) => s + t.costo, 0),
-  });
+  };
+  return exito(plan);
 };

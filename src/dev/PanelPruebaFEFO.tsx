@@ -4,10 +4,12 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 import { db, aRegistro } from '../data/db';
-import { repositorioInventario } from '../data/repositorios/InventarioRepositorioDexie';
+import {
+  repositorioInventario,
+  type ErrorInventario,
+} from '../data/repositorios/InventarioRepositorioDexie';
 import { planificadorReferencia } from './planificadorReferencia';
 import type { FechaISO, Insumo, Lote } from '../domain/tipos';
-import type { ErrorSalida } from '../domain/puertos';
 
 const INSUMO_ID = 'demo-harina';
 
@@ -30,7 +32,7 @@ function loteDemo(id: string, dias: number, cantidad: number, costo: number): Lo
   };
 }
 
-function describirError(e: ErrorSalida): string {
+function describirError(e: ErrorInventario): string {
   switch (e.tipo) {
     case 'faltante':
       return `Stock insuficiente: faltan ${e.faltante.faltante} g (hay ${e.faltante.disponible} g).`;
@@ -64,7 +66,15 @@ export function PanelPruebaFEFO() {
     await db.transaction('rw', db.insumos, db.lotes_inventario, db.movimientos_inventario, async () => {
       await db.lotes_inventario.where('insumoId').equals(INSUMO_ID).delete();
       await db.movimientos_inventario.where('insumoId').equals(INSUMO_ID).delete();
-      await db.insumos.put(aRegistro<Insumo>({ id: INSUMO_ID, nombre: 'Harina (prueba)', unidad: 'g', merma: 0 }));
+      await db.insumos.put(
+        aRegistro<Insumo>({
+          id: INSUMO_ID,
+          nombre: 'Harina (prueba)',
+          unidad: 'g',
+          presentacion: { cantidad: 1000, precio: 0 },
+          merma: 0,
+        }),
+      );
 
       await db.lotes_inventario.bulkPut([
         aRegistro(loteDemo('demo-lote-C', 40, 500, 0.014)),

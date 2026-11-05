@@ -27,9 +27,9 @@ const bizcocho: Receta = {
   minutosElaboracion: 60,
   minutosHorneado: 30,
   ingredientes: [
-    { insumoId: 'harina', cantidad: 500 }, // 5.00
-    { insumoId: 'azucar', cantidad: 300 }, // 2.40
-    { insumoId: 'huevo', cantidad: 4 }, //    4.00
+    { insumoId: 'harina', cantidad: 500 },
+    { insumoId: 'azucar', cantidad: 300 },
+    { insumoId: 'huevo', cantidad: 4 },
   ],
 };
 
@@ -120,7 +120,7 @@ describe('consolidado y precio', () => {
 
   it('cotización con precio comercial redondeado a Bs 0,50', () => {
     const q = cotizar(bizcocho, insumos, config, 3, 0.3);
-    expect(q.precioUnitario).toBe(8.16); // 5.715 / 0.7 = 8.1642…
+    expect(q.precioUnitario).toBe(8.16);
     expect(q.precioUnitarioComercial).toBe(8.5);
     expect(q.precioTotal).toBe(25.5);
     expect(q.costoTotal).toBeCloseTo(17.15, 2);

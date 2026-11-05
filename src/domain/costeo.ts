@@ -1,17 +1,5 @@
-/**
- * GustoDulce · Dominio · Costeo ABC (MPD, MOD, CIF) y precio sugerido.
- *
- * Funciones puras y deterministas. Ningún cálculo se delega a un modelo de
- * lenguaje: el módulo conversacional solo redacta a partir de estos números.
- *
- *   MPD:   C_MPD = Σ Q_i · P_i / (U_i · (1 − m_i))
- *   MOD:   T_min = Sueldo / (60 · H_mes)        ← H_mes lo configura la repostera
- *          C_MOD = T_min · (t_elaboración + t_horneado)
- *   CIF:   r     = (Luz + Agua + Gas) / (60 · H_mes)
- *          C_CIF = r · (t_elaboración + t_horneado)
- *   Total: C_u   = (C_MPD + C_MOD + C_CIF) / N
- *          P_v   = C_u / (1 − g),  0 ≤ g < 1
- */
+
+
 import { ErrorDominio, HORAS_MES_MAXIMO } from './tipos';
 import type { ConfiguracionCostos, Id, Insumo, Receta } from './tipos';
 import {
@@ -22,8 +10,6 @@ import {
   redondearAlAlza,
   sumaPrecisa,
 } from './numeros';
-
-/* ───────────── Validaciones ───────────── */
 
 export function validarInsumo(insumo: Insumo): void {
   asegurarPositivo(insumo.presentacion.cantidad, `Presentación de ${insumo.nombre}`);
@@ -57,15 +43,11 @@ export function validarConfiguracion(config: ConfiguracionCostos): void {
   asegurarNoNegativo(config.servicios.gas, 'Monto de gas');
 }
 
-/* ───────────── MPD ───────────── */
-
-/** Costo efectivo por unidad base, ya ajustado por merma: P / (U · (1 − m)). */
 export function costoPorUnidadBase(insumo: Insumo): number {
   validarInsumo(insumo);
   return insumo.presentacion.precio / (insumo.presentacion.cantidad * (1 - insumo.merma));
 }
 
-/** Cantidad bruta que sale de la despensa para obtener `neta` utilizable: Q / (1 − m). */
 export function cantidadBruta(neta: number, merma: number): number {
   asegurarNoNegativo(neta, 'Cantidad neta');
   if (merma < 0 || merma >= 1) {
@@ -86,7 +68,6 @@ export interface DetalleMPD {
   readonly lineas: readonly LineaMPD[];
 }
 
-/** Costo de materia prima a precios de referencia del catálogo (para cotizar). */
 export function calcularMPD(receta: Receta, insumos: ReadonlyMap<Id, Insumo>): DetalleMPD {
   const lineas = receta.ingredientes.map((ing): LineaMPD => {
     const insumo = insumos.get(ing.insumoId);
@@ -104,15 +85,11 @@ export function calcularMPD(receta: Receta, insumos: ReadonlyMap<Id, Insumo>): D
   return { total: sumaPrecisa(lineas.map((l) => l.costo)), lineas };
 }
 
-/* ───────────── MOD ───────────── */
-
-/** Tarifa por minuto: Sueldo / (60 · horas reales al mes). */
 export function tasaMinutoMOD(config: ConfiguracionCostos): number {
   validarConfiguracion(config);
   return config.sueldoMensual / (60 * config.horasTrabajoMes);
 }
 
-/** Minutos imputables a la receta (actividades de elaboración + horneado). */
 export function minutosReceta(receta: Receta): number {
   return receta.minutosElaboracion + receta.minutosHorneado;
 }
@@ -122,9 +99,6 @@ export function calcularMOD(receta: Receta, config: ConfiguracionCostos): number
   return tasaMinutoMOD(config) * minutosReceta(receta);
 }
 
-/* ───────────── CIF ───────────── */
-
-/** Costo indirecto promedio por minuto: (Luz + Agua + Gas) / (60 · horas al mes). */
 export function tasaMinutoCIF(config: ConfiguracionCostos): number {
   validarConfiguracion(config);
   const { luz, agua, gas } = config.servicios;
@@ -135,8 +109,6 @@ export function calcularCIF(receta: Receta, config: ConfiguracionCostos): number
   validarReceta(receta);
   return tasaMinutoCIF(config) * minutosReceta(receta);
 }
-
-/* ───────────── Consolidado ───────────── */
 
 export interface CostoReceta {
   readonly mpd: number;
@@ -169,9 +141,6 @@ export function calcularCostoReceta(
   };
 }
 
-/* ───────────── Precio ───────────── */
-
-/** P_v = C_u / (1 − g). El margen g es sobre el precio de venta (0 ≤ g < 1). */
 export function precioSugerido(costoUnitario: number, margen: number): number {
   asegurarNoNegativo(costoUnitario, 'Costo unitario');
   asegurarFinito(margen, 'Margen');
@@ -186,9 +155,9 @@ export interface Cotizacion {
   readonly unidades: number;
   readonly margen: number;
   readonly costoUnitario: number;
-  /** Precio exacto redondeado al centavo. */
+
   readonly precioUnitario: number;
-  /** Precio redondeado hacia arriba al múltiplo comercial (por defecto Bs 0,50). */
+
   readonly precioUnitarioComercial: number;
   readonly precioTotal: number;
   readonly costoTotal: number;

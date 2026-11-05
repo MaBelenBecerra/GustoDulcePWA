@@ -6,9 +6,10 @@ import {
   InventarioRepositorioDexie,
   agruparTomas,
   validarPlan,
+  type PlanInventario,
 } from './InventarioRepositorioDexie';
 import { planificadorReferencia } from '../../dev/planificadorReferencia';
-import type { Lote, PlanSalida } from '../../domain/tipos';
+import type { Lote } from '../../domain/tipos';
 
 const repo = new InventarioRepositorioDexie();
 const INSUMO = 'harina';
@@ -85,7 +86,7 @@ describe('descontarFEFO', () => {
 });
 
 describe('aplicarPlanSalida (atomicidad)', () => {
-  const plan = (tomas: PlanSalida['tomas']): PlanSalida => ({
+  const plan = (tomas: PlanInventario['tomas']): PlanInventario => ({
     insumoId: INSUMO,
     cantidadSolicitada: tomas.reduce((s, t) => s + t.cantidad, 0),
     tomas,

@@ -1,39 +1,19 @@
-/**
- * GustoDulce · Dominio · Inventario multilote FEFO y producción atómica.
- *
- * FEFO (First-Expired, First-Out): se consume primero el lote que vence antes,
- * sin importar cuándo se compró. Los lotes vencidos (semáforo rojo) nunca se
- * consumen: se dan de baja como merma financiera.
- *
- * Deducción en cascada para una cantidad Q sobre los lotes ordenados L_1…L_m:
- *   x_j = min(q_j, max(0, Q − Σ_{i<j} x_i))
- *   C_salida = Σ x_j · c_j
- *
- * Atomicidad: todas las funciones son puras e inmutables. `producir` calcula
- * TODOS los planes antes de tocar el inventario; si falta un solo insumo
- * devuelve un error y el inventario original queda intacto.
- */
+
+
 import { cantidadBruta } from './costeo';
 import { compararFechas, diasRestantes, semaforo, SEVERIDAD_SEMAFORO } from './fechas';
 import { asegurarNoNegativo, asegurarPositivo, sumaPrecisa, TOLERANCIA } from './numeros';
 import { ErrorDominio, exito, fallo } from './tipos';
 import type { FechaISO, Id, Insumo, Lote, Receta, Resultado, Semaforo } from './tipos';
 
-/* ───────────── Strategy ───────────── */
-
-/** Contrato de una política de consumo de lotes (patrón Strategy). */
 export interface EstrategiaConsumo {
   readonly nombre: string;
-  /** Devuelve, en orden de consumo, los lotes consumibles del insumo. */
+
   seleccionar(lotes: readonly Lote[], insumoId: Id, hoy: FechaISO): Lote[];
 }
 
 const compararTexto = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/**
- * Única estrategia del MVP. Orden: vencimiento ascendente → ingreso
- * ascendente → id (desempate determinista, independiente del locale).
- */
 export const estrategiaFEFO: EstrategiaConsumo = {
   nombre: 'FEFO',
   seleccionar(lotes, insumoId, hoy) {
@@ -53,8 +33,6 @@ export const estrategiaFEFO: EstrategiaConsumo = {
   },
 };
 
-/* ───────────── Planificación de consumo ───────────── */
-
 export interface Asignacion {
   readonly loteId: Id;
   readonly insumoId: Id;
@@ -72,12 +50,11 @@ export interface PlanConsumo {
 export interface Faltante {
   readonly insumoId: Id;
   readonly requerido: number;
-  /** Stock consumible (no vencido). */
+
   readonly disponible: number;
   readonly faltante: number;
 }
 
-/** Calcula, sin modificar nada, qué lotes cubrirían la cantidad pedida. */
 export function planificarConsumo(
   lotes: readonly Lote[],
   insumoId: Id,
@@ -96,7 +73,6 @@ export function planificarConsumo(
     restante -= x;
   }
 
-  // Tolerancia relativa: absorbe residuos de 0.1 + 0.2 en cantidades grandes.
   if (restante > TOLERANCIA * Math.max(1, cantidad)) {
     const disponible = cantidad - restante;
     return fallo({ insumoId, requerido: cantidad, disponible, faltante: restante });
@@ -109,7 +85,6 @@ export function planificarConsumo(
   });
 }
 
-/** Aplica planes ya validados y devuelve un NUEVO arreglo de lotes. */
 export function aplicarPlanes(lotes: readonly Lote[], planes: readonly PlanConsumo[]): Lote[] {
   const descuento = new Map<Id, number>();
   for (const plan of planes) {
@@ -124,12 +99,10 @@ export function aplicarPlanes(lotes: readonly Lote[], planes: readonly PlanConsu
     if (nuevo < -TOLERANCIA * Math.max(1, lote.cantidadDisponible)) {
       throw new ErrorDominio('LOTE_INVALIDO', `El lote ${lote.id} quedaría con saldo negativo.`);
     }
-    // Un residuo minúsculo se considera lote agotado.
+
     return { ...lote, cantidadDisponible: nuevo <= TOLERANCIA ? 0 : nuevo };
   });
 }
-
-/* ───────────── Producción atómica ───────────── */
 
 export type ErrorProduccion =
   | { readonly tipo: 'STOCK_INSUFICIENTE'; readonly faltantes: readonly Faltante[] }
@@ -138,7 +111,7 @@ export type ErrorProduccion =
 export interface ResultadoProduccion {
   readonly lotes: Lote[];
   readonly planes: readonly PlanConsumo[];
-  /** Costo REAL de materia prima según los lotes consumidos. */
+
   readonly costoMPDReal: number;
   readonly unidadesProducidas: number;
 }
@@ -147,17 +120,12 @@ export interface SolicitudProduccion {
   readonly lotes: readonly Lote[];
   readonly receta: Receta;
   readonly insumos: ReadonlyMap<Id, Insumo>;
-  /** Cuántas veces se prepara la receta completa (entero ≥ 1). */
+
   readonly veces: number;
   readonly hoy: FechaISO;
   readonly estrategia?: EstrategiaConsumo;
 }
 
-/**
- * Consumo bruto por insumo. Agrega ingredientes repetidos: si una receta
- * lista "azúcar" dos veces (masa y cobertura), se planifica UNA sola vez
- * contra los lotes; planificarlos por separado contaría dos veces el mismo stock.
- */
 export function consumoBrutoReceta(
   receta: Receta,
   insumos: ReadonlyMap<Id, Insumo>,
@@ -182,7 +150,6 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
   const consumo = consumoBrutoReceta(receta, insumos, veces);
   if (!consumo.ok) return consumo;
 
-  // Fase 1: planificar TODO sin modificar el inventario.
   const planes: PlanConsumo[] = [];
   const faltantes: Faltante[] = [];
   for (const [insumoId, cantidad] of consumo.valor) {
@@ -192,7 +159,6 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
   }
   if (faltantes.length > 0) return fallo({ tipo: 'STOCK_INSUFICIENTE', faltantes });
 
-  // Fase 2: confirmar. Solo se llega aquí si todos los insumos alcanzan.
   return exito({
     lotes: aplicarPlanes(lotes, planes),
     planes,
@@ -201,19 +167,16 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
   });
 }
 
-/* ───────────── Ingreso de compras ───────────── */
-
 export interface DatosCompra {
   readonly id: Id;
-  /** Número de presentaciones compradas (ej. 3 bolsas de 1 kg). */
+
   readonly presentaciones: number;
-  /** Total pagado en Bs por todas las presentaciones. */
+
   readonly precioPagado: number;
   readonly fechaIngreso: FechaISO;
   readonly fechaVencimiento: FechaISO;
 }
 
-/** Crea un lote a partir de una compra registrada en pantalla. */
 export function registrarCompra(insumo: Insumo, compra: DatosCompra): Lote {
   asegurarPositivo(compra.presentaciones, 'Presentaciones compradas');
   asegurarNoNegativo(compra.precioPagado, 'Precio pagado');
@@ -233,7 +196,6 @@ export function registrarCompra(insumo: Insumo, compra: DatosCompra): Lote {
   };
 }
 
-/** Agrega un lote validando que su id no exista ya (idempotencia ante doble toque). */
 export function agregarLote(lotes: readonly Lote[], lote: Lote): Lote[] {
   if (lotes.some((l) => l.id === lote.id)) {
     throw new ErrorDominio('LOTE_INVALIDO', `Ya existe un lote con id ${lote.id}.`);
@@ -241,18 +203,16 @@ export function agregarLote(lotes: readonly Lote[], lote: Lote): Lote[] {
   return [...lotes, lote];
 }
 
-/* ───────────── Consultas y mermas ───────────── */
-
 export interface ResumenInsumo {
   readonly insumoId: Id;
-  /** Stock consumible (no vencido). */
+
   readonly disponible: number;
-  /** Stock vencido aún no dado de baja. */
+
   readonly vencido: number;
   readonly valorDisponible: number;
   readonly valorVencido: number;
   readonly proximoVencimiento: FechaISO | null;
-  /** Peor semáforo entre los lotes con saldo; null si no hay stock. */
+
   readonly semaforo: Semaforo | null;
   readonly lotesActivos: number;
 }
@@ -295,7 +255,6 @@ export interface ResultadoBaja {
   readonly valorTotal: number;
 }
 
-/** Lleva a cero los lotes vencidos y reporta su valor como merma financiera. */
 export function darDeBajaVencidos(lotes: readonly Lote[], hoy: FechaISO): ResultadoBaja {
   const mermas: MermaVencimiento[] = [];
   const nuevos = lotes.map((l) => {

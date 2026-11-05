@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import {
   AlertTriangle,
   BookOpen,
@@ -48,6 +49,7 @@ import type {
   Semaforo,
   UnidadBase,
 } from './domain';
+import { db, aRegistro, aDominio, ID_CONFIG_LABORAL } from './data/db';
 import { CONFIGURACION_DEMO, crearLotesDemo, INSUMOS_DEMO, RECETAS_DEMO } from './data/demo';
 import './App.css';
 
@@ -119,12 +121,6 @@ interface PropsSelector {
   ayuda?: string;
 }
 
-/**
- * Selector Numérico Incremental "Sucia-Friendly".
- * - Botones circulares de 64×64 px separados 12 px (≥ 48 dp exigidos).
- * - Mantener presionado repite y acelera (útil para 120 horas o 45 días).
- * - Sin teclado del sistema. Accesible por teclado vía Enter/Espacio.
- */
 function SelectorNumerico({ etiqueta, valor, onCambio, min, max, paso, formato, ayuda }: PropsSelector) {
   const valorRef = useRef(valor);
   const temporizador = useRef<number | null>(null);
@@ -744,15 +740,85 @@ export default function App() {
   const hoy = useHoy();
   const [seccion, setSeccion] = useState<Seccion>('inventario');
   const [menuAbierto, setMenuAbierto] = useState(false);
-  const [insumos, setInsumos] = useState<readonly Insumo[]>(INSUMOS_DEMO);
-  const [lotes, setLotes] = useState<readonly Lote[]>(() => crearLotesDemo(fechaLocalISO(new Date())));
-  const [recetas, setRecetas] = useState<readonly Receta[]>(RECETAS_DEMO);
-  const [config, setConfig] = useState<ConfiguracionCostos>(CONFIGURACION_DEMO);
-  const [mermaAcumulada, setMermaAcumulada] = useState(0);
+  const [datosInicializados, setDatosInicializados] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
 
+  const insumosQuery = useLiveQuery(
+    () => db.insumos.filter((i) => i.eliminado === 0).toArray(),
+    [],
+  );
+  const lotesQuery = useLiveQuery(
+    () => db.lotes_inventario.filter((l) => l.eliminado === 0).toArray(),
+    [],
+  );
+  const recetasQuery = useLiveQuery(
+    () => db.recetas.filter((r) => r.eliminado === 0).toArray(),
+    [],
+  );
+  const configQuery = useLiveQuery(async () => {
+    const registro = await db.config_laboral.get(ID_CONFIG_LABORAL);
+    if (!registro) return undefined;
+    const { id: _id, ...configuracion } = aDominio(registro);
+    return configuracion;
+  }, []);
+  const movimientosQuery = useLiveQuery(() => db.movimientos_inventario.toArray(), []);
+  const insumos = insumosQuery ?? [];
+  const lotes = lotesQuery ?? [];
+  const recetas = recetasQuery ?? [];
+  const config = configQuery ?? CONFIGURACION_DEMO;
+  const mermaAcumulada = sumaPrecisa(
+    (movimientosQuery ?? [])
+      .filter((movimiento) => movimiento.tipo === 'baja-vencimiento')
+      .map((movimiento) => movimiento.costo),
+  );
   const cerrarAviso = useCallback(() => setAviso(null), []);
   const mapaInsumos = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
+
+  useEffect(() => {
+    let activo = true;
+    const inicializar = async () => {
+      await db.transaction(
+        'rw',
+        db.insumos,
+        db.lotes_inventario,
+        db.recetas,
+        db.config_laboral,
+        async () => {
+          if ((await db.insumos.count()) === 0) {
+            await db.insumos.bulkPut(INSUMOS_DEMO.map((insumo) => aRegistro(insumo)));
+          }
+          if ((await db.lotes_inventario.count()) === 0) {
+            await db.lotes_inventario.bulkPut(
+              crearLotesDemo(fechaLocalISO(new Date())).map((lote) => aRegistro(lote)),
+            );
+          }
+          if ((await db.recetas.count()) === 0) {
+            await db.recetas.bulkPut(RECETAS_DEMO.map((receta) => aRegistro(receta)));
+          }
+          if (!(await db.config_laboral.get(ID_CONFIG_LABORAL))) {
+            await db.config_laboral.put(
+              aRegistro({ ...CONFIGURACION_DEMO, id: ID_CONFIG_LABORAL }),
+            );
+          }
+        },
+      );
+    };
+    void inicializar()
+      .then(() => {
+        if (activo) setDatosInicializados(true);
+      })
+      .catch((error: unknown) => {
+        if (!activo) return;
+        setAviso({
+          tipo: 'error',
+          texto: error instanceof Error ? error.message : 'No se pudieron cargar los datos locales.',
+        });
+        setDatosInicializados(true);
+      });
+    return () => {
+      activo = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuAbierto) return;
@@ -767,62 +833,202 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
-  const registrar = (insumoId: Id, presentaciones: number, precioPorPresentacion: number, diasVence: number) => {
-    const insumo = mapaInsumos.get(insumoId);
-    if (!insumo) return;
+  const registrar = async (insumoId: Id, presentaciones: number, precioPorPresentacion: number, diasVence: number) => {
     try {
-      const lote = registrarCompra(insumo, {
-        id: nuevoId(`L-${insumoId}`),
-        presentaciones,
-        precioPagado: precioPorPresentacion * presentaciones,
-        fechaIngreso: hoy,
-        fechaVencimiento: sumarDias(hoy, diasVence),
+      const nombre = await db.transaction('rw', db.insumos, db.lotes_inventario, async () => {
+        const registro = await db.insumos.get(insumoId);
+        if (!registro || registro.eliminado === 1) {
+          throw new Error('El insumo seleccionado ya no existe.');
+        }
+        const insumo = aDominio(registro);
+        const lote = registrarCompra(insumo, {
+          id: nuevoId(`L-${insumoId}`),
+          presentaciones,
+          precioPagado: precioPorPresentacion * presentaciones,
+          fechaIngreso: hoy,
+          fechaVencimiento: sumarDias(hoy, diasVence),
+        });
+        await db.lotes_inventario.add(aRegistro(lote));
+        await db.insumos.put(
+          aRegistro({
+            ...insumo,
+            presentacion: { ...insumo.presentacion, precio: precioPorPresentacion },
+          }),
+        );
+        return insumo.nombre;
       });
-      setLotes((ls) => [...ls, lote]);
-      setInsumos((is) =>
-        is.map((i) => (i.id === insumoId ? { ...i, presentacion: { ...i.presentacion, precio: precioPorPresentacion } } : i)),
+      setAviso({ tipo: 'exito', texto: `Compra de ${nombre} guardada. Tus recetas ya usan el nuevo precio.` });
+    } catch (error) {
+      setAviso({ tipo: 'error', texto: error instanceof Error ? error.message : 'No se pudo guardar la compra.' });
+    }
+  };
+
+  const darDeBaja = async () => {
+    try {
+      const valorTotal = await db.transaction('rw', db.lotes_inventario, db.movimientos_inventario, async () => {
+        const registros = await db.lotes_inventario.filter((l) => l.eliminado === 0).toArray();
+        const resultado = darDeBajaVencidos(registros.map((registro) => aDominio(registro)), hoy);
+        if (resultado.mermas.length === 0) return 0;
+        const porId = new Map(resultado.lotes.map((lote) => [lote.id, lote]));
+        const lotesModificados = resultado.mermas.map((merma) => porId.get(merma.loteId)!);
+        const operacionId = nuevoId('baja');
+        const fecha = Date.now();
+        await db.lotes_inventario.bulkPut(lotesModificados.map((lote) => aRegistro(lote)));
+        await db.movimientos_inventario.bulkAdd(
+          resultado.mermas.map((merma) => {
+            const lote = porId.get(merma.loteId)!;
+            return aRegistro({
+              id: nuevoId('mov'),
+              operacionId,
+              tipo: 'baja-vencimiento' as const,
+              insumoId: merma.insumoId,
+              loteId: merma.loteId,
+              cantidad: merma.cantidad,
+              costoUnitario: lote.costoUnitario,
+              costo: merma.valor,
+              fecha,
+              motivo: 'Baja por vencimiento',
+            });
+          }),
+        );
+        return resultado.valorTotal;
+      });
+      if (valorTotal === 0) return;
+      setAviso({ tipo: 'exito', texto: `Merma registrada: ${formatearBs(valorTotal)}.` });
+    } catch (error) {
+      setAviso({ tipo: 'error', texto: error instanceof Error ? error.message : 'No se pudo registrar la baja.' });
+    }
+  };
+
+  const actualizarReceta = async (recetaId: Id, cambio: (r: Receta) => Receta) => {
+    try {
+      await db.transaction('rw', db.recetas, async () => {
+        const registro = await db.recetas.get(recetaId);
+        if (!registro || registro.eliminado === 1) throw new Error('La receta seleccionada ya no existe.');
+        await db.recetas.put(aRegistro(cambio(aDominio(registro))));
+      });
+    } catch (error) {
+      setAviso({ tipo: 'error', texto: error instanceof Error ? error.message : 'No se pudo guardar la receta.' });
+    }
+  };
+
+  const producirReceta = async (recetaId: Id, veces: number) => {
+    const nombreReceta = recetas.find((actual) => actual.id === recetaId)?.nombre ?? 'la receta';
+    try {
+      const resultado = await db.transaction(
+        'rw',
+        db.insumos,
+        db.recetas,
+        db.lotes_inventario,
+        db.movimientos_inventario,
+        async () => {
+          const recetaRegistro = await db.recetas.get(recetaId);
+          if (!recetaRegistro || recetaRegistro.eliminado === 1) {
+            throw new Error('La receta seleccionada ya no existe.');
+          }
+          const [insumosRegistros, lotesRegistros] = await Promise.all([
+            db.insumos.filter((insumo) => insumo.eliminado === 0).toArray(),
+            db.lotes_inventario.filter((lote) => lote.eliminado === 0).toArray(),
+          ]);
+          const insumosActuales = insumosRegistros.map((insumo) => aDominio(insumo));
+          const lotesActuales = lotesRegistros.map((lote) => aDominio(lote));
+          const produccion = producir({
+            lotes: lotesActuales,
+            receta: aDominio(recetaRegistro),
+            insumos: new Map(insumosActuales.map((insumo) => [insumo.id, insumo])),
+            veces,
+            hoy,
+          });
+          if (!produccion.ok) return produccion;
+
+          const porId = new Map(produccion.valor.lotes.map((lote) => [lote.id, lote]));
+          const consumos = produccion.valor.planes.flatMap((plan) =>
+            plan.asignaciones.map((asignacion) => ({
+              loteId: asignacion.loteId,
+              insumoId: asignacion.insumoId,
+              cantidad: asignacion.cantidad,
+              costo: asignacion.costo,
+            })),
+          );
+          const idsLotesActualizados = [...new Set(consumos.map((consumo) => consumo.loteId))];
+          const lotesActualizados = idsLotesActualizados.map((loteId) => {
+            const lote = porId.get(loteId);
+            if (!lote) throw new Error(`No se encontró el lote ${loteId} tras planificar la producción.`);
+            return aRegistro(lote);
+          });
+          if (lotesActualizados.length > 0) {
+            await db.lotes_inventario.bulkPut(lotesActualizados);
+          }
+          const operacionId = nuevoId('produccion');
+          const fecha = Date.now();
+          if (consumos.length > 0) {
+            await db.movimientos_inventario.bulkAdd(
+              consumos.map((consumo) => {
+                const lote = lotesActuales.find((actual) => actual.id === consumo.loteId);
+                if (!lote) {
+                  throw new Error(`No se encontró el lote ${consumo.loteId} al registrar el movimiento.`);
+                }
+                return aRegistro({
+                  id: nuevoId('mov'),
+                  operacionId,
+                  tipo: 'salida' as const,
+                  insumoId: consumo.insumoId,
+                  loteId: consumo.loteId,
+                  cantidad: consumo.cantidad,
+                  costoUnitario: lote.costoUnitario,
+                  costo: consumo.costo,
+                  fecha,
+                  motivo: `Producción de ${aDominio(recetaRegistro).nombre}`,
+                });
+              }),
+            );
+          }
+          return produccion;
+        },
       );
-      setAviso({ tipo: 'exito', texto: `Compra de ${insumo.nombre} guardada. Tus recetas ya usan el nuevo precio.` });
-    } catch (e) {
-      setAviso({ tipo: 'error', texto: e instanceof Error ? e.message : 'No se pudo guardar la compra.' });
+      if (resultado.ok) {
+        setAviso({
+          tipo: 'exito',
+          texto: `¡Listo! ${resultado.valor.unidadesProducidas} porciones de ${nombreReceta}. Materia prima usada: ${formatearBs(resultado.valor.costoMPDReal)}.`,
+        });
+        return;
+      }
+      const { error } = resultado;
+      if (error.tipo === 'INSUMO_DESCONOCIDO') {
+        setAviso({ tipo: 'error', texto: 'La receta usa un insumo que ya no existe.' });
+        return;
+      }
+      const detalle = error.faltantes
+        .map((faltante) => {
+          const insumo = mapaInsumos.get(faltante.insumoId);
+          return insumo
+            ? `${insumo.nombre} (faltan ${formatearCantidad(faltante.faltante, insumo.unidad)})`
+            : faltante.insumoId;
+        })
+        .join(', ');
+      setAviso({ tipo: 'error', texto: `No alcanza: ${detalle}. No se descontó nada.` });
+    } catch (error) {
+      setAviso({ tipo: 'error', texto: error instanceof Error ? error.message : 'No se pudo completar la producción.' });
     }
   };
 
-  const darDeBaja = () => {
-    const resultado = darDeBajaVencidos(lotes, hoy);
-    if (resultado.mermas.length === 0) return;
-    setLotes(resultado.lotes);
-    setMermaAcumulada((m) => m + resultado.valorTotal);
-    setAviso({ tipo: 'exito', texto: `Merma registrada: ${formatearBs(resultado.valorTotal)}.` });
-  };
-
-  const actualizarReceta = (recetaId: Id, cambio: (r: Receta) => Receta) =>
-    setRecetas((rs) => rs.map((r) => (r.id === recetaId ? cambio(r) : r)));
-
-  const producirReceta = (recetaId: Id, veces: number) => {
-    const receta = recetas.find((r) => r.id === recetaId);
-    if (!receta) return;
-    const resultado = producir({ lotes, receta, insumos: mapaInsumos, veces, hoy });
-    if (resultado.ok) {
-      setLotes(resultado.valor.lotes);
-      setAviso({
-        tipo: 'exito',
-        texto: `¡Listo! ${resultado.valor.unidadesProducidas} porciones de ${receta.nombre}. Materia prima usada: ${formatearBs(resultado.valor.costoMPDReal)}.`,
+  const actualizarConfiguracion = async (cambio: (actual: ConfiguracionCostos) => ConfiguracionCostos) => {
+    try {
+      await db.transaction('rw', db.config_laboral, async () => {
+        const registro = await db.config_laboral.get(ID_CONFIG_LABORAL);
+        let actual = CONFIGURACION_DEMO;
+        if (registro) {
+          const dominio = aDominio(registro);
+          const { id: _id, ...configuracion } = dominio;
+          actual = configuracion;
+        }
+        await db.config_laboral.put(
+          aRegistro({ ...cambio(actual), id: ID_CONFIG_LABORAL }),
+        );
       });
-      return;
+    } catch (error) {
+      setAviso({ tipo: 'error', texto: error instanceof Error ? error.message : 'No se pudo guardar la configuración.' });
     }
-    const { error } = resultado;
-    if (error.tipo === 'INSUMO_DESCONOCIDO') {
-      setAviso({ tipo: 'error', texto: 'La receta usa un insumo que ya no existe.' });
-      return;
-    }
-    const detalle = error.faltantes
-      .map((f) => {
-        const insumo = mapaInsumos.get(f.insumoId);
-        return insumo ? `${insumo.nombre} (faltan ${formatearCantidad(f.faltante, insumo.unidad)})` : f.insumoId;
-      })
-      .join(', ');
-    setAviso({ tipo: 'error', texto: `No alcanza: ${detalle}. No se descontó nada.` });
   };
 
   const actual = SECCIONES.find((s) => s.id === seccion) ?? SECCIONES[0]!;
@@ -887,29 +1093,39 @@ export default function App() {
       )}
 
       <main className="mx-auto max-w-lg px-4 pt-4 pb-32">
-        {seccion === 'inventario' && (
-          <PantallaInventario
-            insumos={insumos}
-            lotes={lotes}
-            hoy={hoy}
-            mermaAcumulada={mermaAcumulada}
-            onRegistrarCompra={registrar}
-            onDarDeBaja={darDeBaja}
-          />
+        {!datosInicializados ? (
+          <p role="status" className="text-lg text-cafe-700">Cargando tus datos…</p>
+        ) : (
+          <>
+            {seccion === 'inventario' && (
+              <PantallaInventario
+                insumos={insumos}
+                lotes={lotes}
+                hoy={hoy}
+                mermaAcumulada={mermaAcumulada}
+                onRegistrarCompra={registrar}
+                onDarDeBaja={darDeBaja}
+              />
+            )}
+            {seccion === 'recetas' && (
+              <PantallaRecetas
+                recetas={recetas}
+                insumos={insumos}
+                lotes={lotes}
+                config={config}
+                hoy={hoy}
+                onActualizar={actualizarReceta}
+                onProducir={producirReceta}
+              />
+            )}
+            {seccion === 'costos' && (
+              <PantallaCostos config={config} onCambiar={actualizarConfiguracion} />
+            )}
+            {seccion === 'cotizador' && (
+              <PantallaCotizador recetas={recetas} insumos={insumos} config={config} />
+            )}
+          </>
         )}
-        {seccion === 'recetas' && (
-          <PantallaRecetas
-            recetas={recetas}
-            insumos={insumos}
-            lotes={lotes}
-            config={config}
-            hoy={hoy}
-            onActualizar={actualizarReceta}
-            onProducir={producirReceta}
-          />
-        )}
-        {seccion === 'costos' && <PantallaCostos config={config} onCambiar={setConfig} />}
-        {seccion === 'cotizador' && <PantallaCotizador recetas={recetas} insumos={insumos} config={config} />}
       </main>
 
       <AvisoFlotante aviso={aviso} onCerrar={cerrarAviso} />

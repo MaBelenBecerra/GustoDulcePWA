@@ -42,12 +42,12 @@
   }
 
   * {
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* Edge legado */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   *::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, Android WebView */
+    display: none;
   }
 
   button {

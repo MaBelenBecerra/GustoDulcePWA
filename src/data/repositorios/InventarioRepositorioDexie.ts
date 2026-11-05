@@ -1,5 +1,3 @@
-
-
 import {
   db,
   aDominio,
@@ -12,17 +10,49 @@ import {
   exito,
   fallo,
   type Insumo,
-  type Lote,
-  type PlanSalida,
+  type LoteInventario,
   type Resultado,
-  type TomaLote,
 } from '../../domain/tipos';
-import type {
-  ErrorSalida,
-  PlanificadorSalida,
-  RepositorioInventario,
-  SalidaAplicada,
-} from '../../domain/puertos';
+
+export interface TomaInventario {
+  readonly loteId: string;
+  readonly cantidad: number;
+  readonly costoUnitario: number;
+  readonly costo: number;
+}
+
+export interface PlanInventario {
+  readonly insumoId: string;
+  readonly cantidadSolicitada: number;
+  readonly tomas: readonly TomaInventario[];
+  readonly costoTotal: number;
+}
+
+export interface FaltanteInventario {
+  readonly insumoId: string;
+  readonly requerido: number;
+  readonly disponible: number;
+  readonly faltante: number;
+}
+
+export type ErrorInventario =
+  | { readonly tipo: 'faltante'; readonly faltante: FaltanteInventario }
+  | { readonly tipo: 'stock-insuficiente'; readonly loteId: string; readonly solicitado: number; readonly disponible: number }
+  | { readonly tipo: 'lote-no-encontrado'; readonly loteId: string }
+  | { readonly tipo: 'costo-desactualizado'; readonly loteId: string }
+  | { readonly tipo: 'plan-invalido'; readonly detalle: string };
+
+export type PlanificadorInventario = (
+  insumoId: string,
+  cantidad: number,
+  lotesFEFO: readonly LoteInventario[],
+) => Resultado<PlanInventario, FaltanteInventario>;
+
+export interface SalidaInventarioAplicada {
+  readonly operacionId: string;
+  readonly plan: PlanInventario;
+  readonly lotesActualizados: readonly LoteInventario[];
+}
 
 export function casiIgual(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -34,7 +64,7 @@ export interface TomaAgrupada {
   readonly costo: number;
 }
 
-export function agruparTomas(tomas: readonly TomaLote[]): Map<string, TomaAgrupada> | null {
+export function agruparTomas(tomas: readonly TomaInventario[]): Map<string, TomaAgrupada> | null {
   const mapa = new Map<string, TomaAgrupada>();
   for (const t of tomas) {
     const previa = mapa.get(t.loteId);
@@ -48,58 +78,55 @@ export function agruparTomas(tomas: readonly TomaLote[]): Map<string, TomaAgrupa
   return mapa;
 }
 
-export function validarPlan(plan: PlanSalida): string | null {
-  const Q = plan.cantidadSolicitada;
-  if (!Number.isFinite(Q) || Q <= 0) return 'cantidadSolicitada debe ser > 0';
+export function validarPlan(plan: PlanInventario): string | null {
+  const cantidad = plan.cantidadSolicitada;
+  if (!Number.isFinite(cantidad) || cantidad <= 0) return 'cantidadSolicitada debe ser > 0';
   if (plan.tomas.length === 0) return 'el plan no tiene tomas';
-  for (const t of plan.tomas) {
-    if (!t.loteId) return 'toma sin loteId';
-    if (!Number.isFinite(t.cantidad) || t.cantidad <= 0)
-      return `toma inválida en lote ${t.loteId}`;
+  for (const toma of plan.tomas) {
+    if (!toma.loteId) return 'toma sin loteId';
+    if (!Number.isFinite(toma.cantidad) || toma.cantidad <= 0) {
+      return `toma inválida en lote ${toma.loteId}`;
+    }
   }
-  const suma = plan.tomas.reduce((s, t) => s + t.cantidad, 0);
-  if (!casiIgual(suma, Q)) return `las tomas suman ${suma}, se pidió ${Q}`;
+  const suma = plan.tomas.reduce((total, toma) => total + toma.cantidad, 0);
+  if (!casiIgual(suma, cantidad)) return `las tomas suman ${suma}, se pidió ${cantidad}`;
   return null;
 }
 
 class AbortoSalida extends Error {
-
-  readonly causa: ErrorSalida;
-  constructor(causa: ErrorSalida) {
+  constructor(readonly causa: ErrorInventario) {
     super(`Salida abortada: ${causa.tipo}`);
     this.name = 'AbortoSalida';
-    this.causa = causa;
   }
 }
 
-export class InventarioRepositorioDexie implements RepositorioInventario {
+export class InventarioRepositorioDexie {
   async registrarInsumo(insumo: Insumo): Promise<void> {
     await db.insumos.put(aRegistro(insumo));
   }
 
-  async registrarLote(lote: Lote): Promise<void> {
+  async registrarLote(lote: LoteInventario): Promise<void> {
     await db.lotes_inventario.put(aRegistro(lote));
   }
 
-  obtenerLotesFEFO(insumoId: string): Promise<Lote[]> {
+  obtenerLotesFEFO(insumoId: string): Promise<LoteInventario[]> {
     return obtenerLotesFEFO(insumoId);
   }
 
   aplicarPlanSalida(
-    plan: PlanSalida,
+    plan: PlanInventario,
     motivo: string,
-  ): Promise<Resultado<SalidaAplicada, ErrorSalida>> {
+  ): Promise<Resultado<SalidaInventarioAplicada, ErrorInventario>> {
     return this.enTransaccion(() => this.aplicar(plan, motivo));
   }
 
   descontarFEFO(
     insumoId: string,
     cantidad: number,
-    planificar: PlanificadorSalida,
+    planificar: PlanificadorInventario,
     motivo: string,
-  ): Promise<Resultado<SalidaAplicada, ErrorSalida>> {
+  ): Promise<Resultado<SalidaInventarioAplicada, ErrorInventario>> {
     return this.enTransaccion(async () => {
-
       const lotes = await obtenerLotesFEFO(insumoId);
       const resultado = planificar(insumoId, cantidad, lotes);
       if (!resultado.ok) throw new AbortoSalida({ tipo: 'faltante', faltante: resultado.error });
@@ -108,8 +135,8 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
   }
 
   private async enTransaccion(
-    trabajo: () => Promise<SalidaAplicada>,
-  ): Promise<Resultado<SalidaAplicada, ErrorSalida>> {
+    trabajo: () => Promise<SalidaInventarioAplicada>,
+  ): Promise<Resultado<SalidaInventarioAplicada, ErrorInventario>> {
     try {
       const salida = await db.transaction(
         'rw',
@@ -118,16 +145,17 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
         trabajo,
       );
       return exito(salida);
-    } catch (e) {
-      if (e instanceof AbortoSalida) return fallo(e.causa);
-
-      throw e;
+    } catch (error) {
+      if (error instanceof AbortoSalida) return fallo(error.causa);
+      throw error;
     }
   }
 
-  private async aplicar(plan: PlanSalida, motivo: string): Promise<SalidaAplicada> {
+  private async aplicar(plan: PlanInventario, motivo: string): Promise<SalidaInventarioAplicada> {
     const motivoInvalido = validarPlan(plan);
-    if (motivoInvalido) throw new AbortoSalida({ tipo: 'plan-invalido', detalle: motivoInvalido });
+    if (motivoInvalido) {
+      throw new AbortoSalida({ tipo: 'plan-invalido', detalle: motivoInvalido });
+    }
 
     const tomas = agruparTomas(plan.tomas);
     if (!tomas) {
@@ -140,7 +168,7 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
     const pares = [...tomas.entries()];
     const registros = await db.lotes_inventario.bulkGet(pares.map(([loteId]) => loteId));
     const porId = new Map<string, LoteRegistro>();
-    for (const r of registros) if (r) porId.set(r.id, r);
+    for (const registro of registros) if (registro) porId.set(registro.id, registro);
 
     const operacionId = crypto.randomUUID();
     const fecha = Date.now();
@@ -149,7 +177,6 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
 
     for (const [loteId, toma] of pares) {
       const registro = porId.get(loteId);
-
       if (!registro || registro.eliminado === 1) {
         throw new AbortoSalida({ tipo: 'lote-no-encontrado', loteId });
       }
@@ -174,8 +201,9 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
       }
 
       const cantidadDisponible = casiIgual(restante, 0) || restante < 0 ? 0 : restante;
-
-      lotesNuevos.push(aRegistro<Lote>({ ...aDominio<Lote>(registro), cantidadDisponible }));
+      lotesNuevos.push(
+        aRegistro<LoteInventario>({ ...aDominio<LoteInventario>(registro), cantidadDisponible }),
+      );
       movimientos.push(
         aRegistro({
           id: crypto.randomUUID(),
@@ -198,7 +226,7 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
     return {
       operacionId,
       plan,
-      lotesActualizados: lotesNuevos.map((r) => aDominio<Lote>(r)),
+      lotesActualizados: lotesNuevos.map((registro) => aDominio<LoteInventario>(registro)),
     };
   }
 }

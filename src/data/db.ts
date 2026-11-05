@@ -1,11 +1,16 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type {
-  ConfigLaboral,
+  Configuracion,
   Insumo,
-  Lote,
+  LoteInventario,
   Receta,
-  ServicioFijo,
 } from '../domain/tipos';
+
+export interface ServicioFijo {
+  readonly id: string;
+  readonly tipo: string;
+  readonly monto: number;
+}
 
 export interface MetaSync {
   readonly actualizadoEn: number;
@@ -14,12 +19,12 @@ export interface MetaSync {
 }
 
 export type InsumoRegistro = Insumo & MetaSync;
-export type LoteRegistro = Lote & MetaSync;
+export type LoteRegistro = LoteInventario & MetaSync;
 export type RecetaRegistro = Receta & MetaSync;
 export type ServicioFijoRegistro = ServicioFijo & MetaSync;
 
 export const ID_CONFIG_LABORAL = 'actual' as const;
-export type ConfigLaboralRegistro = ConfigLaboral &
+export type ConfiguracionRegistro = Configuracion &
   MetaSync & { readonly id: typeof ID_CONFIG_LABORAL };
 
 export type TipoMovimiento = 'salida' | 'baja-vencimiento';
@@ -42,7 +47,7 @@ export const db = new Dexie('GustoDulceDB') as Dexie & {
   lotes_inventario: EntityTable<LoteRegistro, 'id'>;
   recetas: EntityTable<RecetaRegistro, 'id'>;
   servicios_fijos: EntityTable<ServicioFijoRegistro, 'id'>;
-  config_laboral: EntityTable<ConfigLaboralRegistro, 'id'>;
+  config_laboral: EntityTable<ConfiguracionRegistro, 'id'>;
   movimientos_inventario: EntityTable<MovimientoRegistro, 'id'>;
 };
 
@@ -68,13 +73,13 @@ export function aDominio<T extends object>(registro: T & MetaSync): T {
   return entidad as T;
 }
 
-export async function obtenerLotesFEFO(insumoId: string): Promise<Lote[]> {
+export async function obtenerLotesFEFO(insumoId: string): Promise<LoteInventario[]> {
   const registros = await db.lotes_inventario
     .where('[insumoId+fechaVencimiento]')
     .between([insumoId, Dexie.minKey], [insumoId, Dexie.maxKey])
     .filter((l) => l.eliminado === 0 && l.cantidadDisponible > 0)
     .toArray();
-  return registros.map((r) => aDominio<Lote>(r));
+  return registros.map((r) => aDominio<LoteInventario>(r));
 }
 
 export async function solicitarAlmacenamientoPersistente(): Promise<boolean> {

@@ -17,11 +17,10 @@ const harina: Insumo = { id: 'harina', nombre: 'Harina', unidad: 'g', presentaci
 const huevo: Insumo = { id: 'huevo', nombre: 'Huevo', unidad: 'u', presentacion: { cantidad: 30, precio: 30 }, merma: 0 };
 const insumos = new Map([harina, huevo].map((i) => [i.id, i]));
 
-/** Comprado ANTES pero vence DESPUÉS: FEFO no lo toca primero. */
 const loteA: Lote = { id: 'A', insumoId: 'harina', cantidadInicial: 300, cantidadDisponible: 300, costoUnitario: 0.01, fechaIngreso: '2026-10-01', fechaVencimiento: '2026-11-20' };
-/** Comprado DESPUÉS pero vence ANTES: FEFO lo consume primero. */
+
 const loteB: Lote = { id: 'B', insumoId: 'harina', cantidadInicial: 200, cantidadDisponible: 200, costoUnitario: 0.012, fechaIngreso: '2026-10-20', fechaVencimiento: '2026-11-08' };
-/** Vencido: nunca se consume. */
+
 const loteC: Lote = { id: 'C', insumoId: 'harina', cantidadInicial: 500, cantidadDisponible: 500, costoUnitario: 0.008, fechaIngreso: '2026-09-01', fechaVencimiento: '2026-11-01' };
 const huevos3: Lote = { id: 'H1', insumoId: 'huevo', cantidadInicial: 3, cantidadDisponible: 3, costoUnitario: 1, fechaIngreso: '2026-11-01', fechaVencimiento: '2026-11-25' };
 
@@ -108,7 +107,7 @@ describe('producir (atómico)', () => {
     const porId = new Map(r.valor.lotes.map((l) => [l.id, l.cantidadDisponible]));
     expect(porId.get('B')).toBe(0);
     expect(porId.get('A')).toBeCloseTo(150, 10);
-    expect(porId.get('C')).toBe(500); // el vencido no se toca
+    expect(porId.get('C')).toBe(500);
     expect(porId.get('H1')).toBe(0);
     expect(r.valor.costoMPDReal).toBeCloseTo(2.4 + 1.5 + 3, 10);
     expect(r.valor.unidadesProducidas).toBe(12);
@@ -121,7 +120,7 @@ describe('producir (atómico)', () => {
     if (r.ok) return;
     expect(r.error.tipo).toBe('STOCK_INSUFICIENTE');
     if (r.error.tipo !== 'STOCK_INSUFICIENTE') return;
-    // Faltan harina (700 > 500) y huevos (6 > 3): se informan TODOS a la vez.
+
     expect(r.error.faltantes.map((f) => f.insumoId).sort()).toEqual(['harina', 'huevo']);
     expect(lotes).toEqual(copia);
   });
@@ -148,7 +147,7 @@ describe('producir (atómico)', () => {
     const r = producir({ lotes, receta, insumos: conMerma, veces: 1, hoy: HOY });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.valor.lotes.find((l) => l.id === 'B')?.cantidadDisponible).toBe(0); // 160 / 0.8 = 200
+    expect(r.valor.lotes.find((l) => l.id === 'B')?.cantidadDisponible).toBe(0);
   });
 
   it('informa insumos desconocidos', () => {
@@ -198,7 +197,7 @@ describe('compras, resumen y mermas', () => {
     expect(baja.valorTotal).toBeCloseTo(4, 12);
     const r = resumenInsumo(baja.lotes, 'harina', HOY);
     expect(r.vencido).toBe(0);
-    expect(r.semaforo).toBe('amarillo'); // lote B vence en 3 días
+    expect(r.semaforo).toBe('amarillo');
   });
 
   it('un insumo sin stock no tiene semáforo', () => {

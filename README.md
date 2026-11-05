@@ -1,62 +1,15 @@
-# React + TypeScript + Vite
+# GustoDulce PWA
+Aplicación Web Progresiva Offline-First diseñada para la gestión financiera y operativa de micro-reposterías artesanales, construida con React, TypeScript y Tailwind CSS v4.
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Arquitectura y Lógica de Dominio
+* **Motor de Costeo ABC (TDABC):** Algoritmo determinista que calcula el costo unitario a partir de Materia Prima Directa (con factor de merma), Mano de Obra Directa (minutaria) y prorrateo de Costos Indirectos de Fabricación (CIF).
+* **Control Logístico FEFO Multilote:** Módulo de inventarios con deducción automática en cascada bajo el principio First-Expired, First-Out, y alertas cromáticas de proximidad de vencimiento (Semáforo de caducidad).
+* **Base de Datos Offline-First:** Persistencia atómica local sin latencia mediante IndexedDB (Dexie.js), con estructura preparada para sincronización asíncrona hacia Firebase Cloud Firestore.
 
-Currently, two official plugins are available:
+## Patrón de Interfaz "Sucia-Friendly"
+Diseño ergonómico Mobile-First adaptado al entorno de cocina. Emplea controles táctiles de gran escala (≥ 48x48 dp), alto contraste visual y selectores numéricos incrementales (+/-) para evitar el uso del teclado alfanumérico denso mientras las manos operan ingredientes.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      tseslint.configs.recommendedTypeChecked,
-      tseslint.configs.strictTypeChecked,
-      tseslint.configs.stylisticTypeChecked,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
-])
-
-```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      reactX.configs['recommended-typescript'],
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-  },
-])
-
-```
+## Comandos de Desarrollo
+- `npm run dev`: Inicia el servidor de desarrollo.
+- `npm test`: Ejecuta la suite de pruebas unitarias del dominio en Vitest.
+- `npm run build`: Compila la aplicación con validación estricta de TypeScript.

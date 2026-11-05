@@ -1,14 +1,4 @@
-/**
- * PanelPruebaFEFO.tsx — Panel TEMPORAL de verificación manual (solo en desarrollo).
- *
- * Uso:
- *  1. Pulsa "Sembrar lotes".
- *  2. Pulsa una deducción.
- *  3. F12 → Application → IndexedDB → GustoDulceDB → lotes_inventario / movimientos_inventario
- *     (clic derecho en la tabla → Refresh si DevTools no se actualiza solo).
- *
- * Borra este archivo y su línea en App.tsx antes de la entrega.
- */
+
 
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -21,7 +11,6 @@ import type { ErrorSalida } from '../domain/puertos';
 
 const INSUMO_ID = 'demo-harina';
 
-/** Fecha LOCAL (no UTC): toISOString() correría el día después de las 20:00 en Bolivia. */
 function fechaLocal(diasDesdeHoy: number): FechaISO {
   const d = new Date();
   d.setDate(d.getDate() + diasDesdeHoy);
@@ -61,7 +50,6 @@ const bs = (n: number) => `Bs ${n.toFixed(2)}`;
 export function PanelPruebaFEFO() {
   const [mensaje, setMensaje] = useState('Pulsa "1. Sembrar lotes" para empezar.');
 
-  // useLiveQuery re-renderiza solo cuando cambian las tablas consultadas.
   const lotes = useLiveQuery(
     () => db.lotes_inventario.where('[insumoId+fechaVencimiento]')
       .between([INSUMO_ID, ''], [INSUMO_ID, '￿']).toArray(),
@@ -77,7 +65,7 @@ export function PanelPruebaFEFO() {
       await db.lotes_inventario.where('insumoId').equals(INSUMO_ID).delete();
       await db.movimientos_inventario.where('insumoId').equals(INSUMO_ID).delete();
       await db.insumos.put(aRegistro<Insumo>({ id: INSUMO_ID, nombre: 'Harina (prueba)', unidad: 'g', merma: 0 }));
-      // Insertados fuera de orden: el FEFO no depende del orden de ingreso.
+
       await db.lotes_inventario.bulkPut([
         aRegistro(loteDemo('demo-lote-C', 40, 500, 0.014)),
         aRegistro(loteDemo('demo-lote-A', 3, 1000, 0.012)),

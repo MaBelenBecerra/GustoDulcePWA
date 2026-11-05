@@ -1,18 +1,4 @@
-/**
- * InventarioRepositorioDexie.ts — Adaptador de persistencia para inventario FEFO.
- *
- * Garantía de atomicidad: lectura de lotes, validación del plan, descuento de
- * cantidades y escritura del kardex ocurren dentro de UNA transacción 'rw' de
- * IndexedDB. Si cualquier paso falla se lanza AbortoSalida, Dexie hace rollback
- * y la base queda exactamente como estaba.
- *
- * Concurrencia: IndexedDB serializa las transacciones 'rw' que comparten tablas,
- * incluso entre pestañas del mismo origen. Dos descuentos simultáneos nunca leen
- * el mismo saldo "viejo".
- *
- * ⚠ Dentro de la transacción NO se debe esperar nada que no sea Dexie (fetch,
- * setTimeout, Firestore): IndexedDB haría commit automático al quedar inactiva.
- */
+
 
 import {
   db,
@@ -38,11 +24,6 @@ import type {
   SalidaAplicada,
 } from '../../domain/puertos';
 
-/* ------------------------------------------------------------------ */
-/* Utilidades puras (exportadas para pruebas)                          */
-/* ------------------------------------------------------------------ */
-
-/** Tolerancia relativa para comparar cantidades en punto flotante (g, ml). */
 export function casiIgual(a: number, b: number): boolean {
   return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 }
@@ -53,11 +34,6 @@ export interface TomaAgrupada {
   readonly costo: number;
 }
 
-/**
- * Une tomas repetidas sobre un mismo lote. Sin esto, dos tomas del mismo lote
- * validarían cada una contra el saldo original y podrían dejarlo negativo.
- * Devuelve null si un mismo lote aparece con costos unitarios distintos.
- */
 export function agruparTomas(tomas: readonly TomaLote[]): Map<string, TomaAgrupada> | null {
   const mapa = new Map<string, TomaAgrupada>();
   for (const t of tomas) {
@@ -72,7 +48,6 @@ export function agruparTomas(tomas: readonly TomaLote[]): Map<string, TomaAgrupa
   return mapa;
 }
 
-/** Valida la forma del plan antes de tocar la base. Devuelve el motivo o null. */
 export function validarPlan(plan: PlanSalida): string | null {
   const Q = plan.cantidadSolicitada;
   if (!Number.isFinite(Q) || Q <= 0) return 'cantidadSolicitada debe ser > 0';
@@ -87,11 +62,8 @@ export function validarPlan(plan: PlanSalida): string | null {
   return null;
 }
 
-
-/** Error interno para abortar (rollback) la transacción con un motivo tipado. */
 class AbortoSalida extends Error {
-  // Propiedad declarada explícitamente (no "constructor(readonly causa)"):
-  // compatible con "erasableSyntaxOnly" de las plantillas actuales de Vite.
+
   readonly causa: ErrorSalida;
   constructor(causa: ErrorSalida) {
     super(`Salida abortada: ${causa.tipo}`);
@@ -127,8 +99,7 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
     motivo: string,
   ): Promise<Resultado<SalidaAplicada, ErrorSalida>> {
     return this.enTransaccion(async () => {
-      // Lectura DENTRO de la transacción: nadie puede modificar los lotes
-      // entre que se planifica y se aplica.
+
       const lotes = await obtenerLotesFEFO(insumoId);
       const resultado = planificar(insumoId, cantidad, lotes);
       if (!resultado.ok) throw new AbortoSalida({ tipo: 'faltante', faltante: resultado.error });
@@ -149,7 +120,7 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
       return exito(salida);
     } catch (e) {
       if (e instanceof AbortoSalida) return fallo(e.causa);
-      // Cuota llena, IndexedDB bloqueada, etc.: no son reglas de negocio.
+
       throw e;
     }
   }
@@ -166,8 +137,6 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
       });
     }
 
-    // Se itera sobre pares [loteId, toma] para no indexar arreglos:
-    // compatible con "noUncheckedIndexedAccess" del tsconfig.
     const pares = [...tomas.entries()];
     const registros = await db.lotes_inventario.bulkGet(pares.map(([loteId]) => loteId));
     const porId = new Map<string, LoteRegistro>();
@@ -204,8 +173,6 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
         });
       }
 
-      // Residuos de punto flotante (p. ej. 1e-13 g) se normalizan a 0
-      // para que el lote salga de la cola FEFO.
       const cantidadDisponible = casiIgual(restante, 0) || restante < 0 ? 0 : restante;
 
       lotesNuevos.push(aRegistro<Lote>({ ...aDominio<Lote>(registro), cantidadDisponible }));
@@ -236,5 +203,4 @@ export class InventarioRepositorioDexie implements RepositorioInventario {
   }
 }
 
-/** Instancia única para la app. En pruebas puedes crear otras. */
 export const repositorioInventario = new InventarioRepositorioDexie();

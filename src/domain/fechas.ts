@@ -1,105 +1,109 @@
 /**
- * fechas.ts — Aritmética de días calendario y semáforo de caducidad.
+ * GustoDulce · Dominio · Aritmética de días y semáforo de caducidad.
  *
- * Las fechas del dominio son fechas CIVILES "YYYY-MM-DD" (sin hora ni zona).
- * Toda la aritmética se hace en días UTC enteros para que el horario de
- * Bolivia (UTC-4) o un cambio de hora en el dispositivo nunca desplacen
- * un vencimiento un día.
+ * Las fechas se manejan como días de calendario ('YYYY-MM-DD') convertidos a
+ * "día epoch" en UTC. Así el cálculo es puro, no depende de la zona horaria
+ * del dispositivo ni de cambios de horario, y "hoy" siempre se recibe como
+ * parámetro (el dominio nunca lee el reloj del sistema).
  */
+import { ErrorDominio, UMBRAL_AMARILLO_DIAS } from './tipos';
 import type { FechaISO, Semaforo } from './tipos';
 
-const MS_POR_DIA = 86_400_000;
 const PATRON_ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MS_POR_DIA = 86_400_000;
 
-/** Umbral superior (inclusive) de la franja amarilla. */
-export const UMBRAL_AMARILLO_DIAS = 7;
-
-export function esFechaISO(valor: string): valor is FechaISO {
-  const m = PATRON_ISO.exec(valor);
-  if (!m) return false;
-  const [, a, me, d] = m;
-  const fecha = new Date(Date.UTC(Number(a), Number(me) - 1, Number(d)));
-  // Rechaza fechas imposibles como 2026-02-30 (Date las "desborda" a marzo).
-  return (
-    fecha.getUTCFullYear() === Number(a) &&
-    fecha.getUTCMonth() === Number(me) - 1 &&
-    fecha.getUTCDate() === Number(d)
-  );
+/** Convierte 'YYYY-MM-DD' a días desde 1970-01-01. Rechaza fechas imposibles (2026-02-30). */
+export function aDiaEpoch(fecha: FechaISO): number {
+  const m = PATRON_ISO.exec(fecha);
+  if (!m) throw new ErrorDominio('FECHA_INVALIDA', `Formato de fecha inválido: "${fecha}".`);
+  const anio = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  const ms = Date.UTC(anio, mes - 1, dia);
+  const d = new Date(ms);
+  if (d.getUTCFullYear() !== anio || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) {
+    throw new ErrorDominio('FECHA_INVALIDA', `La fecha "${fecha}" no existe en el calendario.`);
+  }
+  return Math.round(ms / MS_POR_DIA);
 }
 
-export function asegurarFechaISO(valor: string): FechaISO {
-  if (!esFechaISO(valor)) throw new RangeError(`Fecha inválida (se espera YYYY-MM-DD): "${valor}"`);
-  return valor;
+/** Convierte un día epoch a 'YYYY-MM-DD'. */
+export function desdeDiaEpoch(diaEpoch: number): FechaISO {
+  if (!Number.isInteger(diaEpoch)) {
+    throw new ErrorDominio('FECHA_INVALIDA', 'El día epoch debe ser un entero.');
+  }
+  return new Date(diaEpoch * MS_POR_DIA).toISOString().slice(0, 10);
 }
 
-/** Número de día absoluto (días desde 1970-01-01 UTC). */
-export function aDiaAbsoluto(fecha: FechaISO): number {
-  const m = PATRON_ISO.exec(asegurarFechaISO(fecha));
-  // m no es null porque asegurarFechaISO ya validó.
-  const [, a, me, d] = m as RegExpExecArray;
-  return Math.round(Date.UTC(Number(a), Number(me) - 1, Number(d)) / MS_POR_DIA);
+/** ¿Es una fecha ISO válida? */
+export function esFechaValida(fecha: string): boolean {
+  try {
+    aDiaEpoch(fecha);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function desdeDiaAbsoluto(dia: number): FechaISO {
-  if (!Number.isInteger(dia)) throw new RangeError('El día absoluto debe ser entero');
-  return new Date(dia * MS_POR_DIA).toISOString().slice(0, 10) as FechaISO;
-}
-
-/** hasta − desde, en días enteros (positivo si `hasta` es posterior). */
+/** Días transcurridos de `desde` a `hasta` (negativo si `hasta` es anterior). */
 export function diasEntre(desde: FechaISO, hasta: FechaISO): number {
-  return aDiaAbsoluto(hasta) - aDiaAbsoluto(desde);
+  return aDiaEpoch(hasta) - aDiaEpoch(desde);
 }
 
+/** Suma (o resta) días enteros a una fecha. */
 export function sumarDias(fecha: FechaISO, dias: number): FechaISO {
-  return desdeDiaAbsoluto(aDiaAbsoluto(fecha) + dias);
+  if (!Number.isInteger(dias)) {
+    throw new ErrorDominio('FECHA_INVALIDA', 'Solo se pueden sumar días enteros.');
+  }
+  return desdeDiaEpoch(aDiaEpoch(fecha) + dias);
 }
 
+/** Comparador para ordenar fechas ascendentemente. */
 export function compararFechas(a: FechaISO, b: FechaISO): number {
-  return aDiaAbsoluto(a) - aDiaAbsoluto(b);
+  return aDiaEpoch(a) - aDiaEpoch(b);
 }
 
-/**
- * Fecha civil LOCAL del dispositivo. Usar `toISOString()` aquí sería un error:
- * a las 21:00 en Santa Cruz (UTC-4) ya es "mañana" en UTC.
- */
-export function fechaLocalDe(instante: Date): FechaISO {
-  const a = instante.getFullYear();
-  const m = String(instante.getMonth() + 1).padStart(2, '0');
-  const d = String(instante.getDate()).padStart(2, '0');
-  return `${a}-${m}-${d}` as FechaISO;
+/** d_j = f_vencimiento − f_hoy. */
+export function diasRestantes(vencimiento: FechaISO, hoy: FechaISO): number {
+  return diasEntre(hoy, vencimiento);
 }
 
-/** d_j = f_vencimiento − f_hoy */
-export function diasRestantes(fechaVencimiento: FechaISO, hoy: FechaISO): number {
-  return diasEntre(hoy, fechaVencimiento);
-}
-
-/**
- * Semáforo de caducidad:
- *  - verde:    d > 7
- *  - amarillo: 0 ≤ d ≤ 7  (vence hoy todavía es utilizable)
- *  - rojo:     d < 0      (vencido → merma)
- */
-export function clasificarDias(dias: number): Semaforo {
-  if (!Number.isInteger(dias)) throw new RangeError('Los días restantes deben ser enteros');
+/** Semáforo a partir de los días restantes ya calculados. */
+export function semaforoPorDias(dias: number): Semaforo {
+  if (!Number.isInteger(dias)) {
+    throw new ErrorDominio('FECHA_INVALIDA', 'Los días restantes deben ser enteros.');
+  }
   if (dias < 0) return 'rojo';
   if (dias <= UMBRAL_AMARILLO_DIAS) return 'amarillo';
   return 'verde';
 }
 
-export function semaforoCaducidad(fechaVencimiento: FechaISO, hoy: FechaISO): Semaforo {
-  return clasificarDias(diasRestantes(fechaVencimiento, hoy));
+/**
+ * Semáforo de caducidad:
+ *  - Verde:    d > 7
+ *  - Amarillo: 0 ≤ d ≤ 7 (un lote que vence HOY todavía se puede usar)
+ *  - Rojo:     d < 0 (vencido → merma financiera)
+ */
+export function semaforo(vencimiento: FechaISO, hoy: FechaISO): Semaforo {
+  return semaforoPorDias(diasRestantes(vencimiento, hoy));
 }
 
-export function estaVencido(fechaVencimiento: FechaISO, hoy: FechaISO): boolean {
-  return diasRestantes(fechaVencimiento, hoy) < 0;
-}
+/** Severidad numérica para escoger el peor semáforo de un conjunto. */
+export const SEVERIDAD_SEMAFORO: Readonly<Record<Semaforo, number>> = {
+  verde: 0,
+  amarillo: 1,
+  rojo: 2,
+};
 
-const PRIORIDAD: Record<Semaforo, number> = { verde: 0, amarillo: 1, rojo: 2 };
-
-/** Devuelve el estado más urgente de una lista (rojo > amarillo > verde). */
-export function peorSemaforo(estados: readonly Semaforo[]): Semaforo | null {
-  let peor: Semaforo | null = null;
-  for (const e of estados) if (peor === null || PRIORIDAD[e] > PRIORIDAD[peor]) peor = e;
-  return peor;
+/**
+ * Fecha local del dispositivo como 'YYYY-MM-DD'. Es el ÚNICO punto que toca
+ * un `Date` del sistema; la capa de presentación lo llama y pasa el resultado
+ * al motor. Usa la fecha local (America/La_Paz), no UTC: a las 21:00 en
+ * Santa Cruz ya es el día siguiente en UTC.
+ */
+export function fechaLocalISO(fecha: Date): FechaISO {
+  const a = fecha.getFullYear();
+  const m = String(fecha.getMonth() + 1).padStart(2, '0');
+  const d = String(fecha.getDate()).padStart(2, '0');
+  return `${a}-${m}-${d}`;
 }

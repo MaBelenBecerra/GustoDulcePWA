@@ -1,73 +1,89 @@
 /**
- * numeros.ts — Redondeo y tolerancias numéricas.
+ * GustoDulce · Dominio · Redondeo y tolerancias numéricas.
  *
- * Política del motor: se calcula SIEMPRE con precisión completa (IEEE-754 double)
- * y se redondea SOLO en el borde (presentación o montos finales de cotización).
- * Las comparaciones contra cero usan EPSILON para absorber residuos del tipo
- * 0.1 + 0.2 = 0.30000000000000004 al partir lotes.
+ * Política: el motor calcula con precisión completa de punto flotante y solo
+ * redondea al presentar o al fijar un precio. Las comparaciones de cantidades
+ * usan tolerancia para absorber residuos como 0.1 + 0.2 = 0.30000000000000004.
  */
+import { ErrorDominio } from './tipos';
 
-/** Tolerancia absoluta para considerar una cantidad (g, ml, unidades, Bs) como cero. */
-export const EPSILON = 1e-9;
-
-/** Decimales monetarios del Boliviano. */
-export const DECIMALES_BS = 2;
+/** Tolerancia absoluta/relativa para comparar cantidades. */
+export const TOLERANCIA = 1e-9;
 
 /** Lanza si el valor no es un número finito. */
-export function asegurarFinito(valor: number, nombre = 'valor'): number {
-  if (!Number.isFinite(valor)) {
-    throw new RangeError(`${nombre} debe ser un número finito (recibido: ${valor})`);
+export function asegurarFinito(valor: number, campo: string): number {
+  if (typeof valor !== 'number' || !Number.isFinite(valor)) {
+    throw new ErrorDominio('NUMERO_INVALIDO', `${campo} debe ser un número finito.`);
   }
   return valor;
 }
 
-/** Lanza si el valor es negativo o no finito. Devuelve el valor para encadenar. */
-export function asegurarNoNegativo(valor: number, nombre = 'valor'): number {
-  asegurarFinito(valor, nombre);
-  if (valor < -EPSILON) {
-    throw new RangeError(`${nombre} no puede ser negativo (recibido: ${valor})`);
+/** Lanza si el valor no es finito o es negativo. */
+export function asegurarNoNegativo(valor: number, campo: string): number {
+  asegurarFinito(valor, campo);
+  if (valor < 0) {
+    throw new ErrorDominio('NUMERO_INVALIDO', `${campo} no puede ser negativo.`);
   }
-  return valor < 0 ? 0 : valor;
+  return valor;
+}
+
+/** Lanza si el valor no es finito o no es estrictamente positivo. */
+export function asegurarPositivo(valor: number, campo: string): number {
+  asegurarFinito(valor, campo);
+  if (valor <= 0) {
+    throw new ErrorDominio('NUMERO_INVALIDO', `${campo} debe ser mayor que cero.`);
+  }
+  return valor;
 }
 
 /**
- * Redondeo "half away from zero" simétrico y robusto a errores binarios.
- * redondear(1.005, 2) === 1.01 (Math.round ingenuo devuelve 1.00).
+ * Redondeo "mitad lejos de cero" con corrección relativa de épsilon.
+ * redondear(1.005) === 1.01 (Math.round ingenuo devuelve 1.00).
  */
-export function redondear(valor: number, decimales = DECIMALES_BS): number {
+export function redondear(valor: number, decimales = 2): number {
   asegurarFinito(valor, 'valor a redondear');
-  if (!Number.isInteger(decimales) || decimales < 0 || decimales > 12) {
-    throw new RangeError(`decimales inválidos: ${decimales}`);
+  if (!Number.isInteger(decimales) || decimales < 0 || decimales > 10) {
+    throw new ErrorDominio('NUMERO_INVALIDO', 'decimales debe ser un entero entre 0 y 10.');
   }
   const factor = 10 ** decimales;
   const signo = valor < 0 ? -1 : 1;
-  // toPrecision(15) elimina la "basura" binaria antes de redondear.
-  const escalado = Number((Math.abs(valor) * factor).toPrecision(15));
-  const resultado = (signo * Math.round(escalado)) / factor;
-  return Object.is(resultado, -0) ? 0 : resultado;
+  const resultado = (signo * Math.round(Math.abs(valor) * factor * (1 + Number.EPSILON))) / factor;
+  return resultado === 0 ? 0 : resultado; // evita -0
 }
 
-/** Redondeo monetario a centavos de Boliviano. */
-export function redondearBs(valor: number): number {
-  return redondear(valor, DECIMALES_BS);
+/**
+ * Redondea hacia arriba al siguiente múltiplo de `paso` (precio comercial).
+ * Ej.: 23.12 con paso 0.5 → 23.5. Un valor ya múltiplo no sube.
+ */
+export function redondearAlAlza(valor: number, paso = 0.5): number {
+  asegurarNoNegativo(valor, 'valor');
+  asegurarPositivo(paso, 'paso');
+  const cociente = valor / paso;
+  const entero = Math.ceil(cociente - TOLERANCIA * Math.max(1, Math.abs(cociente)));
+  return redondear(entero * paso, 2);
 }
 
-/** Igualdad con tolerancia relativa/absoluta combinada. */
-export function casiIgual(a: number, b: number, tolerancia = EPSILON): boolean {
-  return Math.abs(a - b) <= tolerancia * Math.max(1, Math.abs(a), Math.abs(b));
+/** Igualdad con tolerancia relativa (mínimo absoluto = tol). */
+export function casiIgual(a: number, b: number, tol = TOLERANCIA): boolean {
+  return Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
 }
 
-export function esCero(valor: number): boolean {
-  return Math.abs(valor) <= EPSILON;
+/** ¿Es el valor prácticamente cero? */
+export function esCasiCero(valor: number, tol = TOLERANCIA): boolean {
+  return Math.abs(valor) <= tol;
 }
 
-/** Convierte residuos ínfimos (p. ej. 1e-14) en 0 exacto. */
-export function limpiarResiduo(valor: number): number {
-  return esCero(valor) ? 0 : valor;
+/** Restringe un valor al intervalo [min, max]. */
+export function limitar(valor: number, min: number, max: number): number {
+  if (min > max) throw new ErrorDominio('NUMERO_INVALIDO', 'min no puede superar a max.');
+  return Math.min(max, Math.max(min, valor));
 }
 
-/** Suma compensada (Neumaier): estable al acumular muchos montos pequeños. */
-export function sumar(valores: readonly number[]): number {
+/**
+ * Suma compensada de Neumaier: determinista y con menor error acumulado que
+ * un reduce ingenuo cuando se suman muchos montos pequeños.
+ */
+export function sumaPrecisa(valores: readonly number[]): number {
   let suma = 0;
   let compensacion = 0;
   for (const v of valores) {
@@ -79,7 +95,12 @@ export function sumar(valores: readonly number[]): number {
   return suma + compensacion;
 }
 
-export function acotar(valor: number, minimo: number, maximo: number): number {
-  if (minimo > maximo) throw new RangeError('acotar: mínimo mayor que máximo');
-  return Math.min(maximo, Math.max(minimo, valor));
+const formatoBs = new Intl.NumberFormat('es-BO', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** Formato monetario para pantalla: "Bs 12,50". */
+export function formatearBs(valor: number): string {
+  return `Bs ${formatoBs.format(redondear(valor, 2))}`;
 }

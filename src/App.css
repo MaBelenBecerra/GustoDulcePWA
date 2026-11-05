@@ -1,21 +1,22 @@
-/* Retroalimentación táctil: solo transiciones suaves en el estado :active. */
-.btn-tactil {
+.boton-tactil {
   transition:
     transform 120ms ease-out,
-    background-color 150ms ease-out,
-    box-shadow 150ms ease-out;
+    filter 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
 
-.btn-tactil:active:not(:disabled) {
+.boton-tactil:active:not(:disabled) {
   transform: scale(0.94);
-  box-shadow: inset 0 2px 6px rgb(120 53 15 / 0.18);
+  filter: brightness(0.94);
+  box-shadow: inset 0 2px 6px rgb(59 36 24 / 0.18);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .btn-tactil {
-    transition: background-color 150ms ease-out;
+  .boton-tactil {
+    transition: filter 120ms ease-out;
   }
-  .btn-tactil:active:not(:disabled) {
+
+  .boton-tactil:active:not(:disabled) {
     transform: none;
   }
 }

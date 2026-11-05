@@ -7,10 +7,9 @@ import type {
   ServicioFijo,
 } from '../domain/tipos';
 
-
 export interface MetaSync {
   readonly actualizadoEn: number;
-  readonly pendienteSync: 0 | 1;  
+  readonly pendienteSync: 0 | 1;
   readonly eliminado: 0 | 1;
 }
 
@@ -34,7 +33,7 @@ export interface MovimientoRegistro extends MetaSync {
   readonly cantidad: number;
   readonly costoUnitario: number;
   readonly costo: number;
-  readonly fecha: number; // epoch ms
+  readonly fecha: number;
   readonly motivo: string;
 }
 

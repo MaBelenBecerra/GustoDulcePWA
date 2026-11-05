@@ -1,794 +1,758 @@
-/**
- * App.tsx — Capa de presentación de GustoDulce.
- *
- * Reglas de esta capa:
- *  - NO calcula costos ni mueve stock: todo pasa por `./domain` (motor determinista).
- *  - UI "Sucia-Friendly": cero inputs de texto para cantidades; solo selectores
- *    numéricos con botones circulares de 64 px (≥ 48 dp) separados 12 dp, con
- *    pulsación sostenida para avanzar rápido sin repetir toques.
- */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { PanelPruebaFEFO } from './dev/PanelPruebaFEFO';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   AlertTriangle,
   BookOpen,
+  Cake,
   Calculator,
   CheckCircle2,
-  ChefHat,
   ChevronDown,
+  ChevronUp,
   Clock,
-  Droplets,
   Flame,
-  Lightbulb,
   Menu,
   Minus,
   Package,
   PackagePlus,
   Plus,
-  Receipt,
-  Share2,
   Trash2,
+  Wallet,
   X,
-  type LucideIcon,
 } from 'lucide-react';
-import './App.css';
 import {
-  CONFIG_LABORAL_POR_DEFECTO,
-  acotar,
-  costoPorUnidadBase,
+  calcularCostoReceta,
   cotizar,
-  crearLote,
   darDeBajaVencidos,
   diasRestantes,
-  disponibleUtilizable,
-  estrategiaFEFO,
-  fechaLocalDe,
-  minutosLaborablesMes,
-  necesidadesReceta,
+  fechaLocalISO,
+  formatearBs,
+  HORAS_MES_MAXIMO,
+  limitar,
   producir,
   redondear,
-  resumirInsumo,
-  semaforoCaducidad,
+  registrarCompra,
+  resumenInsumo,
+  semaforo,
+  sumaPrecisa,
   sumarDias,
   tasaMinutoCIF,
   tasaMinutoMOD,
-  tasaMinutoServicio,
-  type FechaISO,
-  type Insumo,
-  type Lote,
-  type Receta,
-  type Semaforo,
-  type ServicioFijo,
-  type TipoServicio,
-  type UnidadBase,
 } from './domain';
-import { INSUMOS_DEMO, RECETAS_DEMO, SERVICIOS_DEMO, crearLotesDemo } from './data/demo';
+import type {
+  ConfiguracionCostos,
+  FechaISO,
+  Id,
+  Insumo,
+  Lote,
+  Receta,
+  Semaforo,
+  UnidadBase,
+} from './domain';
+import { CONFIGURACION_DEMO, crearLotesDemo, INSUMOS_DEMO, RECETAS_DEMO } from './data/demo';
+import './App.css';
 
-// ═══════════════════════════ Formato (solo presentación) ═══════════════════════════
+type Seccion = 'inventario' | 'recetas' | 'costos' | 'cotizador';
 
-const fmtNum = (v: number, dec = 2) =>
-  v.toLocaleString('es-BO', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-
-const fmtBs = (v: number) => `Bs. ${fmtNum(v, 2)}`;
-
-function fmtCantidad(v: number, unidad: UnidadBase): string {
-  if (unidad === 'unidad') return `${fmtNum(v, Number.isInteger(v) ? 0 : 1)} u.`;
-  if (v >= 1000) return `${fmtNum(v / 1000, 2)} ${unidad === 'g' ? 'kg' : 'l'}`;
-  return `${fmtNum(v, Number.isInteger(v) ? 0 : 1)} ${unidad}`;
-}
-
-function fmtFecha(f: FechaISO): string {
-  const [a, m, d] = f.split('-');
-  return `${d}/${m}/${a}`;
-}
-
-// ═══════════════════════════ Componentes base ═══════════════════════════
-
-type Vista = 'inventario' | 'recetas' | 'servicios' | 'cotizador';
-
-const VISTAS: readonly { id: Vista; titulo: string; icono: LucideIcon }[] = [
+const SECCIONES: readonly { id: Seccion; titulo: string; icono: typeof Package }[] = [
   { id: 'inventario', titulo: 'Mi Inventario', icono: Package },
   { id: 'recetas', titulo: 'Mis Recetas', icono: BookOpen },
-  { id: 'servicios', titulo: 'Costos Fijos (Servicios)', icono: Receipt },
+  { id: 'costos', titulo: 'Costos Fijos y Horas', icono: Wallet },
   { id: 'cotizador', titulo: 'Cotizador', icono: Calculator },
 ];
 
-const ESTILO_SEMAFORO: Record<Semaforo, { clase: string; texto: string }> = {
-  verde: { clase: 'bg-emerald-200 text-emerald-950 border-emerald-400', texto: 'Óptimo' },
-  amarillo: { clase: 'bg-amber-200 text-amber-950 border-amber-500', texto: 'Usar pronto' },
-  rojo: { clase: 'bg-red-300 text-red-950 border-red-500', texto: 'Vencido' },
-};
+const formatoNumero = new Intl.NumberFormat('es-BO', { maximumFractionDigits: 2 });
+const formatoFecha = new Intl.DateTimeFormat('es-BO', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-function InsigniaSemaforo({ estado, detalle }: { estado: Semaforo; detalle?: string }) {
-  const e = ESTILO_SEMAFORO[estado];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1 text-sm font-bold ${e.clase}`}>
-      <span className="size-2.5 rounded-full bg-current" aria-hidden />
-      {detalle ?? e.texto}
-    </span>
-  );
+function formatearCantidad(valor: number, unidad: UnidadBase): string {
+  if (unidad === 'g' && valor >= 1000) return `${formatoNumero.format(valor / 1000)} kg`;
+  if (unidad === 'ml' && valor >= 1000) return `${formatoNumero.format(valor / 1000)} l`;
+  if (unidad === 'u') return `${formatoNumero.format(Math.ceil(valor - 1e-9))} u`;
+  return `${formatoNumero.format(redondear(valor, 0))} ${unidad}`;
 }
 
-function Tarjeta({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-3xl border-2 border-amber-200 bg-amber-50 p-4 ${className}`}>{children}</section>;
+function formatearFechaCorta(fecha: FechaISO): string {
+  return formatoFecha.format(new Date(`${fecha}T00:00:00Z`));
 }
 
-function BotonPrimario({
-  children,
-  onClick,
-  icono: Icono,
-  deshabilitado = false,
-  variante = 'rosa',
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  icono?: LucideIcon;
-  deshabilitado?: boolean;
-  variante?: 'rosa' | 'suave';
-}) {
-  const colores =
-    variante === 'rosa'
-      ? 'bg-rose-300 text-amber-950 border-rose-400 active:bg-rose-400'
-      : 'bg-rose-100 text-amber-900 border-rose-200 active:bg-rose-200';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={deshabilitado}
-      className={`btn-tactil flex min-h-16 w-full items-center justify-center gap-3 rounded-2xl border-2 px-5 text-lg font-extrabold disabled:opacity-40 ${colores}`}
-    >
-      {Icono && <Icono className="size-7 shrink-0" strokeWidth={2.5} />}
-      {children}
-    </button>
-  );
+function textoDiasRestantes(dias: number): string {
+  if (dias < -1) return `venció hace ${-dias} días`;
+  if (dias === -1) return 'venció ayer';
+  if (dias === 0) return 'vence hoy';
+  if (dias === 1) return 'vence mañana';
+  return `vence en ${dias} días`;
 }
 
-/** Botón de opción grande (chips de selección: insumo, receta…). */
-function Opcion({ activa, onClick, children }: { activa: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={activa}
-      className={`btn-tactil min-h-14 rounded-2xl border-2 px-4 py-2 text-left text-base font-bold ${
-        activa ? 'border-rose-500 bg-rose-300 text-amber-950' : 'border-amber-200 bg-stone-100 text-stone-800 active:bg-rose-100'
-      }`}
-    >
-      {children}
-    </button>
-  );
+function pasoPorUnidad(unidad: UnidadBase): number {
+  return unidad === 'u' ? 1 : 10;
 }
 
-// ─────────────── Selector Numérico Incremental (único mecanismo de entrada numérica) ───────────────
+function nuevoId(prefijo: string): Id {
+  const aleatorio =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefijo}-${aleatorio}`;
+}
+
+function useHoy(): FechaISO {
+  const [hoy, setHoy] = useState<FechaISO>(() => fechaLocalISO(new Date()));
+  useEffect(() => {
+    const actualizar = () => setHoy(fechaLocalISO(new Date()));
+    document.addEventListener('visibilitychange', actualizar);
+    const intervalo = window.setInterval(actualizar, 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', actualizar);
+      window.clearInterval(intervalo);
+    };
+  }, []);
+  return hoy;
+}
 
 interface PropsSelector {
   etiqueta: string;
   valor: number;
-  onCambio: (v: number) => void;
-  min?: number;
-  max?: number;
-  paso?: number;
-  decimales?: number;
-  formato?: (v: number) => string;
-  icono?: LucideIcon;
+  onCambio: (valor: number) => void;
+  min: number;
+  max: number;
+  paso: number;
+  formato?: (valor: number) => string;
   ayuda?: string;
 }
 
-function SelectorNumerico({
-  etiqueta,
-  valor,
-  onCambio,
-  min = 0,
-  max = 100_000,
-  paso = 1,
-  decimales = 0,
-  formato = (v) => fmtNum(v, decimales),
-  icono: Icono,
-  ayuda,
-}: PropsSelector) {
-  // Refs para que la repetición por pulsación sostenida lea siempre el valor vigente.
+/**
+ * Selector Numérico Incremental "Sucia-Friendly".
+ * - Botones circulares de 64×64 px separados 12 px (≥ 48 dp exigidos).
+ * - Mantener presionado repite y acelera (útil para 120 horas o 45 días).
+ * - Sin teclado del sistema. Accesible por teclado vía Enter/Espacio.
+ */
+function SelectorNumerico({ etiqueta, valor, onCambio, min, max, paso, formato, ayuda }: PropsSelector) {
   const valorRef = useRef(valor);
-  const onCambioRef = useRef(onCambio);
+  const temporizador = useRef<number | null>(null);
+  const repeticiones = useRef(0);
+
   useEffect(() => {
     valorRef.current = valor;
-    onCambioRef.current = onCambio;
-  });
-  const timers = useRef<{ espera?: ReturnType<typeof setTimeout>; repite?: ReturnType<typeof setInterval> }>({});
+  }, [valor]);
+
+  const aplicar = useCallback(
+    (direccion: 1 | -1) => {
+      const factor = repeticiones.current > 20 ? 10 : repeticiones.current > 8 ? 5 : 1;
+      const siguiente = limitar(redondear(valorRef.current + direccion * paso * factor, 4), min, max);
+      if (siguiente !== valorRef.current) {
+        valorRef.current = siguiente;
+        onCambio(siguiente);
+      }
+    },
+    [paso, min, max, onCambio],
+  );
 
   const detener = useCallback(() => {
-    clearTimeout(timers.current.espera);
-    clearInterval(timers.current.repite);
-    timers.current = {};
+    if (temporizador.current !== null) window.clearTimeout(temporizador.current);
+    temporizador.current = null;
+    repeticiones.current = 0;
   }, []);
+
   useEffect(() => detener, [detener]);
 
-  const avanzar = useCallback(
-    (dir: 1 | -1) => {
-      const siguiente = redondear(acotar(valorRef.current + dir * paso, min, max), decimales);
-      if (siguiente === valorRef.current) return detener();
-      valorRef.current = siguiente;
-      onCambioRef.current(siguiente);
-      navigator.vibrate?.(8);
-    },
-    [paso, min, max, decimales, detener],
-  );
-
-  const iniciar = (dir: 1 | -1) => {
+  const iniciar = (direccion: 1 | -1) => (e: ReactPointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     detener();
-    avanzar(dir);
-    timers.current.espera = setTimeout(() => {
-      timers.current.repite = setInterval(() => avanzar(dir), 90);
-    }, 450);
+    aplicar(direccion);
+    const tic = () => {
+      repeticiones.current += 1;
+      aplicar(direccion);
+      temporizador.current = window.setTimeout(tic, 90);
+    };
+    temporizador.current = window.setTimeout(tic, 450);
   };
 
-  const boton = (dir: 1 | -1) => {
-    const Ico = dir === 1 ? Plus : Minus;
-    const enLimite = dir === 1 ? valor >= max : valor <= min;
-    return (
-      <button
-        type="button"
-        aria-label={`${dir === 1 ? 'Aumentar' : 'Disminuir'} ${etiqueta}`}
-        disabled={enLimite}
-        onPointerDown={(e) => {
-          e.preventDefault();
-          iniciar(dir);
-        }}
-        onPointerUp={detener}
-        onPointerLeave={detener}
-        onPointerCancel={detener}
-        onContextMenu={(e) => e.preventDefault()}
-        // Teclado / lector de pantalla: click sin puntero (detail === 0).
-        onClick={(e) => e.detail === 0 && avanzar(dir)}
-        className="btn-tactil grid size-16 shrink-0 select-none place-items-center rounded-full border-2 border-rose-400 bg-rose-300 text-amber-950 shadow-sm active:bg-rose-400 disabled:opacity-30"
-      >
-        <Ico className="size-8" strokeWidth={3} />
-      </button>
-    );
-  };
+  const propsBoton = (direccion: 1 | -1) => ({
+    type: 'button' as const,
+    onPointerDown: iniciar(direccion),
+    onPointerUp: detener,
+    onPointerCancel: detener,
+    onLostPointerCapture: detener,
+    onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault(),
+    onClick: (e: { detail: number }) => {
+      if (e.detail === 0) aplicar(direccion);
+    },
+  });
+
+  const texto = formato ? formato(valor) : formatoNumero.format(valor);
 
   return (
-    <div className="rounded-2xl border-2 border-amber-200 bg-stone-100 p-3">
-      <div className="mb-2 flex items-center gap-2 text-base font-bold text-amber-900">
-        {Icono && <Icono className="size-5" />}
-        {etiqueta}
-      </div>
-      <div className="flex items-center gap-3">
-        {boton(-1)}
-        <output aria-live="polite" className="min-w-0 flex-1 text-center text-3xl font-black tabular-nums text-stone-800">
-          {formato(valor)}
+    <div role="group" aria-label={etiqueta} className="flex flex-col gap-2">
+      <span className="text-base font-semibold text-cafe-700">{etiqueta}</span>
+      <div className="flex items-center justify-between gap-3">
+        <button
+          {...propsBoton(-1)}
+          aria-label={`Disminuir ${etiqueta}`}
+          disabled={valor <= min}
+          className="boton-tactil flex size-16 shrink-0 items-center justify-center rounded-full border-2 border-rosa-400 bg-rosa-100 text-cafe-900 select-none disabled:opacity-35"
+        >
+          <Minus size={30} strokeWidth={3} aria-hidden />
+        </button>
+        <output aria-live="polite" className="min-w-0 flex-1 text-center text-3xl font-extrabold text-cafe-900 tabular-nums">
+          {texto}
         </output>
-        {boton(1)}
+        <button
+          {...propsBoton(1)}
+          aria-label={`Aumentar ${etiqueta}`}
+          disabled={valor >= max}
+          className="boton-tactil flex size-16 shrink-0 items-center justify-center rounded-full border-2 border-rosa-400 bg-rosa-300 text-cafe-900 select-none disabled:opacity-35"
+        >
+          <Plus size={30} strokeWidth={3} aria-hidden />
+        </button>
       </div>
-      {ayuda && <p className="mt-2 text-center text-sm text-stone-600">{ayuda}</p>}
+      {ayuda && <span className="text-sm text-cafe-500">{ayuda}</span>}
     </div>
   );
 }
 
-// ═══════════════════════════ Vista: Mi Inventario ═══════════════════════════
+function Tarjeta({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <section className={`rounded-3xl border-2 border-crema-200 bg-crema-100 p-4 ${className}`}>{children}</section>;
+}
 
-function VistaInventario({
-  insumos,
-  lotes,
-  hoy,
-  onAgregarLote,
-  onDarDeBaja,
+function TituloSeccion({ children }: { children: ReactNode }) {
+  return <h2 className="mb-3 text-xl font-extrabold text-cafe-900">{children}</h2>;
+}
+
+function BotonPrincipal({
+  children,
+  onClick,
+  icono,
+  variante = 'rosa',
 }: {
-  insumos: readonly Insumo[];
-  lotes: readonly Lote[];
-  hoy: FechaISO;
-  onAgregarLote: (l: Lote) => void;
-  onDarDeBaja: () => void;
+  children: ReactNode;
+  onClick: () => void;
+  icono?: ReactNode;
+  variante?: 'rosa' | 'suave';
 }) {
-  const [abierto, setAbierto] = useState<string | null>(null);
-  const [formulario, setFormulario] = useState(false);
-  const [insumoId, setInsumoId] = useState(insumos[0]?.id ?? '');
-  const [cantidad, setCantidad] = useState(1000);
-  const [precio, setPrecio] = useState(10);
-  const [diasVence, setDiasVence] = useState(30);
-
-  const insumoSel = insumos.find((i) => i.id === insumoId);
-  const unidad = insumoSel?.unidad ?? 'g';
-  const pasoCantidad = unidad === 'unidad' ? 1 : 50;
-
-  const alertas = useMemo(() => {
-    let rojos = 0;
-    let amarillos = 0;
-    let costoVencido = 0;
-    for (const l of lotes) {
-      if (l.cantidadDisponible <= 0) continue;
-      const s = semaforoCaducidad(l.fechaVencimiento, hoy);
-      if (s === 'rojo') {
-        rojos++;
-        costoVencido += l.cantidadDisponible * l.costoUnitario;
-      } else if (s === 'amarillo') amarillos++;
-    }
-    return { rojos, amarillos, costoVencido };
-  }, [lotes, hoy]);
-
-  const guardarLote = () => {
-    if (!insumoSel) return;
-    onAgregarLote(
-      crearLote({
-        id: `L-${insumoSel.id}-${Date.now().toString(36)}`,
-        insumoId: insumoSel.id,
-        cantidad,
-        costoUnitario: costoPorUnidadBase(precio, cantidad),
-        fechaIngreso: hoy,
-        fechaVencimiento: sumarDias(hoy, diasVence),
-      }),
-    );
-    setFormulario(false);
-  };
-
+  const estilos =
+    variante === 'rosa'
+      ? 'bg-rosa-300 border-rosa-400 text-cafe-900'
+      : 'bg-crema-50 border-crema-200 text-cafe-700';
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <Tarjeta className="!p-3 text-center">
-          <p className="text-4xl font-black text-amber-700">{alertas.amarillos}</p>
-          <p className="text-sm font-bold text-stone-700">lotes por vencer (≤ 7 días)</p>
-        </Tarjeta>
-        <Tarjeta className="!p-3 text-center">
-          <p className="text-4xl font-black text-red-700">{alertas.rojos}</p>
-          <p className="text-sm font-bold text-stone-700">lotes vencidos</p>
-        </Tarjeta>
-      </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`boton-tactil flex min-h-16 w-full items-center justify-center gap-3 rounded-2xl border-2 px-5 text-lg font-bold select-none ${estilos}`}
+    >
+      {icono}
+      {children}
+    </button>
+  );
+}
 
-      {alertas.rojos > 0 && (
-        <BotonPrimario icono={Trash2} variante="suave" onClick={onDarDeBaja}>
-          Dar de baja vencidos ({fmtBs(alertas.costoVencido)})
-        </BotonPrimario>
-      )}
+const ESTILO_SEMAFORO: Readonly<Record<Semaforo, { clase: string; texto: string }>> = {
+  verde: { clase: 'bg-verde-fondo text-verde-texto border-verde-texto', texto: 'Óptimo' },
+  amarillo: { clase: 'bg-amarillo-fondo text-amarillo-texto border-amarillo-texto', texto: 'Usar pronto' },
+  rojo: { clase: 'bg-rojo-fondo text-rojo-texto border-rojo-texto', texto: 'Vencido' },
+};
 
-      <BotonPrimario icono={formulario ? X : PackagePlus} onClick={() => setFormulario((f) => !f)}>
-        {formulario ? 'Cancelar' : 'Registrar compra (nuevo lote)'}
-      </BotonPrimario>
+function ChipSemaforo({ estado }: { estado: Semaforo }) {
+  const { clase, texto } = ESTILO_SEMAFORO[estado];
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1 text-sm font-bold ${clase}`}>
+      <span aria-hidden className="size-2.5 rounded-full bg-current" />
+      {texto}
+    </span>
+  );
+}
 
-      {formulario && (
-        <Tarjeta className="space-y-3">
-          <p className="text-lg font-extrabold text-amber-900">¿Qué compraste?</p>
-          <div className="grid grid-cols-2 gap-3">
-            {insumos.map((i) => (
-              <Opcion
-                key={i.id}
-                activa={i.id === insumoId}
-                onClick={() => {
-                  setInsumoId(i.id);
-                  setCantidad(i.unidad === 'unidad' ? 30 : 1000);
-                }}
-              >
-                {i.nombre}
-              </Opcion>
-            ))}
-          </div>
-          <SelectorNumerico
-            etiqueta="Cantidad comprada"
-            valor={cantidad}
-            onCambio={setCantidad}
-            min={pasoCantidad}
-            max={50_000}
-            paso={pasoCantidad}
-            formato={(v) => fmtCantidad(v, unidad)}
-          />
-          <SelectorNumerico
-            etiqueta="Precio pagado"
-            valor={precio}
-            onCambio={setPrecio}
-            min={0}
-            max={5_000}
-            paso={0.5}
-            decimales={2}
-            formato={fmtBs}
-            ayuda={`Costo por ${unidad === 'unidad' ? 'unidad' : unidad}: ${fmtBs(costoPorUnidadBase(precio, cantidad))}${
-              unidad === 'unidad' ? '' : ` · por kg/l: ${fmtBs(costoPorUnidadBase(precio, cantidad) * 1000)}`
+function FilaMonto({ etiqueta, valor, fuerte = false }: { etiqueta: string; valor: number; fuerte?: boolean }) {
+  return (
+    <div className={`flex items-baseline justify-between py-1.5 ${fuerte ? 'text-xl font-extrabold text-cafe-900' : 'text-lg text-cafe-700'}`}>
+      <span>{etiqueta}</span>
+      <span className="tabular-nums">{formatearBs(valor)}</span>
+    </div>
+  );
+}
+
+function SelectorOpciones<T extends string>({
+  opciones,
+  valor,
+  onCambio,
+  etiqueta,
+}: {
+  opciones: readonly { id: T; nombre: string }[];
+  valor: T;
+  onCambio: (id: T) => void;
+  etiqueta: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={etiqueta} className="flex flex-col gap-3">
+      {opciones.map((o) => {
+        const activo = o.id === valor;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={activo}
+            onClick={() => onCambio(o.id)}
+            className={`boton-tactil min-h-14 rounded-2xl border-2 px-4 text-left text-lg font-bold ${
+              activo ? 'border-cafe-700 bg-rosa-200 text-cafe-900' : 'border-crema-200 bg-crema-100 text-cafe-700'
             }`}
-          />
-          <SelectorNumerico
-            etiqueta="Vence en"
-            valor={diasVence}
-            onCambio={setDiasVence}
-            min={0}
-            max={730}
-            formato={(v) => `${v} día${v === 1 ? '' : 's'}`}
-            ayuda={`Fecha de vencimiento: ${fmtFecha(sumarDias(hoy, diasVence))}`}
-          />
-          <BotonPrimario icono={CheckCircle2} onClick={guardarLote}>
-            Guardar lote
-          </BotonPrimario>
-        </Tarjeta>
-      )}
-
-      <ul className="space-y-3">
-        {insumos.map((insumo) => {
-          const r = resumirInsumo(lotes, insumo.id, hoy);
-          const propios = lotes.filter((l) => l.insumoId === insumo.id && l.cantidadDisponible > 0);
-          // Orden de consumo FEFO primero; los vencidos al final.
-          const enOrden = [...estrategiaFEFO.ordenar(propios, hoy), ...propios.filter((l) => diasRestantes(l.fechaVencimiento, hoy) < 0)];
-          const expandido = abierto === insumo.id;
-          return (
-            <li key={insumo.id}>
-              <Tarjeta className="!p-0">
-                <button
-                  type="button"
-                  onClick={() => setAbierto(expandido ? null : insumo.id)}
-                  aria-expanded={expandido}
-                  className="btn-tactil flex min-h-20 w-full items-center gap-3 rounded-3xl p-4 text-left"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-lg font-extrabold text-stone-800">{insumo.nombre}</p>
-                    <p className="text-base font-semibold text-stone-600">
-                      {fmtCantidad(r.disponibleUtil, insumo.unidad)} útiles · {fmtBs(r.valorStock)}
-                    </p>
-                  </div>
-                  {r.semaforo ? <InsigniaSemaforo estado={r.semaforo} /> : <span className="text-sm font-bold text-stone-500">Sin stock</span>}
-                  <ChevronDown className={`size-6 shrink-0 text-amber-900 transition-transform ${expandido ? 'rotate-180' : ''}`} />
-                </button>
-                {expandido && (
-                  <ol className="space-y-2 border-t-2 border-amber-200 p-4">
-                    {enOrden.length === 0 && <li className="text-stone-600">No hay lotes con existencias.</li>}
-                    {enOrden.map((l, idx) => {
-                      const d = diasRestantes(l.fechaVencimiento, hoy);
-                      const s = semaforoCaducidad(l.fechaVencimiento, hoy);
-                      return (
-                        <li key={l.id} className="flex items-center gap-3 rounded-2xl bg-stone-100 p-3">
-                          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-amber-200 text-sm font-black text-amber-950">
-                            {s === 'rojo' ? '—' : idx + 1}
-                          </span>
-                          <div className="min-w-0 flex-1 text-sm">
-                            <p className="font-bold text-stone-800">
-                              {fmtCantidad(l.cantidadDisponible, insumo.unidad)} de {fmtCantidad(l.cantidadInicial, insumo.unidad)}
-                            </p>
-                            <p className="text-stone-600">
-                              Vence {fmtFecha(l.fechaVencimiento)} · {fmtBs(l.costoUnitario * (insumo.unidad === 'unidad' ? 1 : 1000))}/
-                              {insumo.unidad === 'unidad' ? 'u.' : insumo.unidad === 'g' ? 'kg' : 'l'}
-                            </p>
-                          </div>
-                          <InsigniaSemaforo
-                            estado={s}
-                            detalle={d < 0 ? `Hace ${-d} d` : d === 0 ? 'Hoy' : `${d} d`}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ol>
-                )}
-              </Tarjeta>
-            </li>
-          );
-        })}
-      </ul>
+          >
+            {o.nombre}
+          </button>
+        );
+      })}
     </div>
   );
 }
-
-// ═══════════════════════════ Vista: Mis Recetas ═══════════════════════════
-
-function VistaRecetas({
-  insumos,
-  lotes,
-  recetas,
-  hoy,
-  onActualizarReceta,
-  onProducir,
-}: {
-  insumos: readonly Insumo[];
-  lotes: readonly Lote[];
-  recetas: readonly Receta[];
-  hoy: FechaISO;
-  onActualizarReceta: (r: Receta) => void;
-  onProducir: (r: Receta, factor: number) => void;
-}) {
-  const [recetaId, setRecetaId] = useState(recetas[0]?.id ?? '');
-  const [factor, setFactor] = useState(1);
-  const receta = recetas.find((r) => r.id === recetaId);
-  const porId = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
-
-  const necesidades = useMemo(
-    () => (receta ? [...necesidadesReceta(receta, insumos, factor)] : []),
-    [receta, insumos, factor],
-  );
-  const alcanza = necesidades.every(([id, q]) => disponibleUtilizable(lotes, id, hoy) + 1e-9 >= q);
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3">
-        {recetas.map((r) => (
-          <Opcion key={r.id} activa={r.id === recetaId} onClick={() => setRecetaId(r.id)}>
-            <span className="flex items-center gap-2">
-              <ChefHat className="size-5 shrink-0" /> {r.nombre}
-              <span className="ml-auto text-sm font-semibold">rinde {r.rendimiento}</span>
-            </span>
-          </Opcion>
-        ))}
-      </div>
-
-      {receta && (
-        <>
-          <Tarjeta className="space-y-3">
-            <p className="flex items-center gap-2 text-lg font-extrabold text-amber-900">
-              <Clock className="size-6" /> Tiempos de la receta
-            </p>
-            <SelectorNumerico
-              etiqueta="Elaboración y decorado"
-              valor={receta.minutosElaboracion}
-              onCambio={(v) => onActualizarReceta({ ...receta, minutosElaboracion: v })}
-              max={600}
-              paso={5}
-              formato={(v) => `${v} min`}
-            />
-            <SelectorNumerico
-              etiqueta="Horneado"
-              icono={Flame}
-              valor={receta.minutosHorneado}
-              onCambio={(v) => onActualizarReceta({ ...receta, minutosHorneado: v })}
-              max={600}
-              paso={5}
-              formato={(v) => `${v} min`}
-            />
-          </Tarjeta>
-
-          <Tarjeta className="space-y-3">
-            <SelectorNumerico
-              etiqueta="¿Cuántas veces la vas a preparar?"
-              valor={factor}
-              onCambio={setFactor}
-              min={1}
-              max={10}
-              formato={(v) => `× ${v}  (${v * receta.rendimiento} u.)`}
-            />
-            <p className="text-lg font-extrabold text-amber-900">Ingredientes (incluye merma)</p>
-            <ul className="space-y-2">
-              {necesidades.map(([id, q]) => {
-                const ins = porId.get(id);
-                if (!ins) return null;
-                const disp = disponibleUtilizable(lotes, id, hoy);
-                const ok = disp + 1e-9 >= q;
-                return (
-                  <li
-                    key={id}
-                    className={`flex items-center gap-3 rounded-2xl border-2 p-3 ${
-                      ok ? 'border-amber-200 bg-stone-100' : 'border-red-400 bg-red-100'
-                    }`}
-                  >
-                    {ok ? (
-                      <CheckCircle2 className="size-6 shrink-0 text-emerald-700" />
-                    ) : (
-                      <AlertTriangle className="size-6 shrink-0 text-red-700" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="font-bold text-stone-800">{ins.nombre}</p>
-                      <p className="text-sm text-stone-600">
-                        Necesitas {fmtCantidad(q, ins.unidad)} · tienes {fmtCantidad(disp, ins.unidad)}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            <BotonPrimario icono={ChefHat} onClick={() => onProducir(receta, factor)}>
-              {alcanza ? 'Producir y descontar stock' : 'Faltan insumos'}
-            </BotonPrimario>
-            <p className="text-center text-sm text-stone-600">
-              Se descuenta por FEFO (primero lo que vence antes). Si falta un solo ingrediente, no se descuenta nada.
-            </p>
-          </Tarjeta>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════ Vista: Costos Fijos (Servicios) ═══════════════════════════
-
-const ICONO_SERVICIO: Record<TipoServicio, LucideIcon> = { luz: Lightbulb, agua: Droplets, gas: Flame };
-
-function VistaServicios({
-  servicios,
-  onCambiarMonto,
-}: {
-  servicios: readonly ServicioFijo[];
-  onCambiarMonto: (id: string, monto: number) => void;
-}) {
-  const cfg = CONFIG_LABORAL_POR_DEFECTO;
-  const tMOD = tasaMinutoMOD(cfg);
-  const tCIF = tasaMinutoCIF(servicios, cfg);
-
-  return (
-    <div className="space-y-4">
-      <Tarjeta className="space-y-2">
-        <p className="text-lg font-extrabold text-amber-900">Tu mano de obra</p>
-        <p className="text-base text-stone-700">
-          Salario de referencia <b>{fmtBs(cfg.salarioMensual)}</b> al mes · {cfg.diasLaborablesMes} días × {cfg.horasPorDia} h ={' '}
-          {fmtNum(minutosLaborablesMes(cfg), 0)} min
-        </p>
-        <div className="grid grid-cols-2 gap-3 pt-1">
-          <div className="rounded-2xl bg-rose-100 p-3 text-center">
-            <p className="text-2xl font-black text-stone-800">{fmtBs(tMOD * 60)}</p>
-            <p className="text-sm font-bold text-stone-600">por hora</p>
-          </div>
-          <div className="rounded-2xl bg-rose-100 p-3 text-center">
-            <p className="text-2xl font-black text-stone-800">{fmtBs(tMOD)}</p>
-            <p className="text-sm font-bold text-stone-600">por minuto</p>
-          </div>
-        </div>
-      </Tarjeta>
-
-      <p className="px-1 text-base font-bold text-stone-700">Monto mensual de tus facturas:</p>
-      {servicios.map((s) => (
-        <SelectorNumerico
-          key={s.id}
-          etiqueta={s.nombre}
-          icono={ICONO_SERVICIO[s.tipo]}
-          valor={s.montoMensual}
-          onCambio={(v) => onCambiarMonto(s.id, v)}
-          max={5_000}
-          paso={5}
-          formato={fmtBs}
-          ayuda={`${fmtBs(tasaMinutoServicio(s, cfg))}/min · se cobra sobre ${
-            s.aplicaA === 'horneado' ? 'minutos de horno' : 'todos los minutos de la receta'
-          }`}
-        />
-      ))}
-
-      <Tarjeta className="text-center">
-        <p className="text-base font-bold text-stone-600">Costo indirecto combinado</p>
-        <p className="text-3xl font-black text-stone-800">{fmtBs(tCIF * 60)} / hora</p>
-        <p className="text-base text-stone-600">{fmtBs(tCIF)} por minuto de producción</p>
-      </Tarjeta>
-    </div>
-  );
-}
-
-// ═══════════════════════════ Vista: Cotizador ═══════════════════════════
-
-function VistaCotizador({
-  insumos,
-  lotes,
-  recetas,
-  servicios,
-  hoy,
-  onAviso,
-}: {
-  insumos: readonly Insumo[];
-  lotes: readonly Lote[];
-  recetas: readonly Receta[];
-  servicios: readonly ServicioFijo[];
-  hoy: FechaISO;
-  onAviso: (a: Aviso) => void;
-}) {
-  const [recetaId, setRecetaId] = useState(recetas[0]?.id ?? '');
-  const [unidades, setUnidades] = useState(12);
-  const [margenPct, setMargenPct] = useState(35);
-  const receta = recetas.find((r) => r.id === recetaId);
-
-  const cot = useMemo(
-    () => (receta ? cotizar({ receta, insumos, lotes, servicios, margen: margenPct / 100, unidades, hoy }) : null),
-    [receta, insumos, lotes, servicios, margenPct, unidades, hoy],
-  );
-
-  /** Plantilla determinista (funciona offline). No expone el desglose interno de costos. */
-  const compartir = async () => {
-    if (!cot || !receta) return;
-    const texto = [
-      '🎂 *GustoDulce* — Cotización',
-      `Producto: ${receta.nombre}`,
-      `Cantidad: ${cot.unidades} u.`,
-      `Precio unitario: ${fmtBs(cot.precioUnitario)}`,
-      `*Total: ${fmtBs(cot.precioTotal)}*`,
-      `Válida hasta el ${fmtFecha(sumarDias(hoy, 7))}.`,
-    ].join('\n');
-    try {
-      if (navigator.share) await navigator.share({ text: texto });
-      else window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
-    } catch (e) {
-      if ((e as DOMException).name !== 'AbortError') onAviso({ tipo: 'error', texto: 'No se pudo compartir la cotización.' });
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3">
-        {recetas.map((r) => (
-          <Opcion key={r.id} activa={r.id === recetaId} onClick={() => setRecetaId(r.id)}>
-            {r.nombre}
-          </Opcion>
-        ))}
-      </div>
-
-      <SelectorNumerico
-        etiqueta="Unidades del pedido"
-        valor={unidades}
-        onCambio={setUnidades}
-        min={1}
-        max={500}
-        formato={(v) => `${v} u.`}
-      />
-      <SelectorNumerico
-        etiqueta="Margen de ganancia"
-        valor={margenPct}
-        onCambio={setMargenPct}
-        min={0}
-        max={90}
-        paso={5}
-        formato={(v) => `${v} %`}
-        ayuda="Porcentaje del precio de venta que queda como ganancia."
-      />
-
-      {cot && (
-        <>
-          <Tarjeta className="border-rose-300 bg-rose-100 text-center">
-            <p className="text-base font-bold text-amber-900">Precio sugerido del pedido</p>
-            <p className="text-5xl font-black tracking-tight text-stone-800">{fmtBs(cot.precioTotal)}</p>
-            <p className="mt-1 text-lg font-bold text-stone-700">{fmtBs(cot.precioUnitario)} por unidad</p>
-          </Tarjeta>
-
-          <Tarjeta>
-            <p className="mb-2 text-lg font-extrabold text-amber-900">Desglose interno (por unidad)</p>
-            <dl className="divide-y-2 divide-amber-200 text-base">
-              {(
-                [
-                  ['Materia prima (MPD)', cot.mpd.total],
-                  ['Mano de obra (MOD)', cot.mod],
-                  ['Servicios (CIF)', cot.cif.total],
-                ] as const
-              ).map(([n, v]) => (
-                <div key={n} className="flex justify-between py-2">
-                  <dt className="text-stone-700">{n}</dt>
-                  <dd className="font-bold tabular-nums text-stone-800">{fmtBs(v / (receta?.rendimiento ?? 1))}</dd>
-                </div>
-              ))}
-              <div className="flex justify-between py-2">
-                <dt className="font-extrabold text-stone-800">Costo unitario</dt>
-                <dd className="font-black tabular-nums text-stone-800">{fmtBs(cot.costoUnitario)}</dd>
-              </div>
-              <div className="flex justify-between py-2">
-                <dt className="font-extrabold text-emerald-800">Tu ganancia del pedido</dt>
-                <dd className="font-black tabular-nums text-emerald-800">{fmtBs(cot.gananciaTotal)}</dd>
-              </div>
-            </dl>
-          </Tarjeta>
-
-          {cot.advertencias.length > 0 && (
-            <Tarjeta className="border-amber-400 bg-amber-100">
-              {cot.advertencias.map((a) => (
-                <p key={a} className="flex gap-2 py-1 text-sm font-semibold text-amber-950">
-                  <AlertTriangle className="size-5 shrink-0" /> {a}
-                </p>
-              ))}
-            </Tarjeta>
-          )}
-
-          <BotonPrimario icono={Share2} onClick={compartir}>
-            Enviar al cliente (WhatsApp)
-          </BotonPrimario>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════ Raíz ═══════════════════════════
 
 interface Aviso {
-  tipo: 'ok' | 'error';
+  tipo: 'exito' | 'error';
   texto: string;
 }
 
-export default function App() {
-  // Fecha civil local fijada al montar. (En producción: recalcular al volver a primer plano.)
-  const [hoy] = useState<FechaISO>(() => fechaLocalDe(new Date()));
-  const [vista, setVista] = useState<Vista>('inventario');
-  const [menuAbierto, setMenuAbierto] = useState(false);
-  const [insumos] = useState<readonly Insumo[]>(INSUMOS_DEMO);
-  const [lotes, setLotes] = useState<Lote[]>(() => crearLotesDemo(hoy));
-  const [recetas, setRecetas] = useState<Receta[]>(() => [...RECETAS_DEMO]);
-  const [servicios, setServicios] = useState<ServicioFijo[]>(() => [...SERVICIOS_DEMO]);
-  const [aviso, setAviso] = useState<Aviso | null>(null);
-
+function AvisoFlotante({ aviso, onCerrar }: { aviso: Aviso | null; onCerrar: () => void }) {
   useEffect(() => {
     if (!aviso) return;
-    const t = setTimeout(() => setAviso(null), 4000);
-    return () => clearTimeout(t);
-  }, [aviso]);
+    const t = window.setTimeout(onCerrar, 7000);
+    return () => window.clearTimeout(t);
+  }, [aviso, onCerrar]);
+
+  if (!aviso) return null;
+  const exito = aviso.tipo === 'exito';
+  return (
+    <div
+      role={exito ? 'status' : 'alert'}
+      className={`fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-lg items-start gap-3 rounded-2xl border-2 p-4 shadow-lg ${
+        exito ? 'border-verde-texto bg-verde-fondo text-verde-texto' : 'border-rojo-texto bg-rojo-fondo text-rojo-texto'
+      }`}
+    >
+      {exito ? <CheckCircle2 className="mt-1 shrink-0" size={26} aria-hidden /> : <AlertTriangle className="mt-1 shrink-0" size={26} aria-hidden />}
+      <p className="flex-1 text-lg font-semibold">{aviso.texto}</p>
+      <button type="button" onClick={onCerrar} aria-label="Cerrar aviso" className="boton-tactil flex size-12 shrink-0 items-center justify-center rounded-full">
+        <X size={26} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+interface PropsInventario {
+  insumos: readonly Insumo[];
+  lotes: readonly Lote[];
+  hoy: FechaISO;
+  mermaAcumulada: number;
+  onRegistrarCompra: (insumoId: Id, presentaciones: number, precioPorPresentacion: number, diasVence: number) => void;
+  onDarDeBaja: () => void;
+}
+
+function PantallaInventario({ insumos, lotes, hoy, mermaAcumulada, onRegistrarCompra, onDarDeBaja }: PropsInventario) {
+  const [abierto, setAbierto] = useState<Id | null>(null);
+  const [comprando, setComprando] = useState<Id | null>(null);
+
+  const resumenes = useMemo(
+    () => insumos.map((i) => ({ insumo: i, resumen: resumenInsumo(lotes, i.id, hoy) })),
+    [insumos, lotes, hoy],
+  );
+  const valorVencido = sumaPrecisa(resumenes.map((r) => r.resumen.valorVencido));
+
+  return (
+    <div className="flex flex-col gap-4">
+      {valorVencido > 0 && (
+        <Tarjeta className="border-rojo-texto bg-rojo-fondo">
+          <p className="mb-3 text-lg font-bold text-rojo-texto">
+            Tienes {formatearBs(valorVencido)} en insumos vencidos. Retíralos de la despensa.
+          </p>
+          <BotonPrincipal onClick={onDarDeBaja} icono={<Trash2 size={24} aria-hidden />} variante="suave">
+            Registrar como merma
+          </BotonPrincipal>
+        </Tarjeta>
+      )}
+
+      {mermaAcumulada > 0 && (
+        <p className="px-1 text-base text-cafe-500">Merma registrada en esta sesión: {formatearBs(mermaAcumulada)}</p>
+      )}
+
+      {resumenes.map(({ insumo, resumen }) => {
+        const expandido = abierto === insumo.id;
+        const lotesInsumo = lotes
+          .filter((l) => l.insumoId === insumo.id && l.cantidadDisponible > 0)
+          .sort((a, b) => diasRestantes(a.fechaVencimiento, hoy) - diasRestantes(b.fechaVencimiento, hoy));
+
+        return (
+          <Tarjeta key={insumo.id}>
+            <button
+              type="button"
+              onClick={() => setAbierto(expandido ? null : insumo.id)}
+              aria-expanded={expandido}
+              className="boton-tactil flex min-h-14 w-full items-center gap-3 text-left"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-xl font-extrabold text-cafe-900">{insumo.nombre}</p>
+                <p className="text-lg text-cafe-700 tabular-nums">
+                  {formatearCantidad(resumen.disponible, insumo.unidad)} disponibles
+                </p>
+                {resumen.proximoVencimiento && (
+                  <p className="text-base text-cafe-500">
+                    Próximo lote {textoDiasRestantes(diasRestantes(resumen.proximoVencimiento, hoy))}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                {resumen.semaforo ? <ChipSemaforo estado={resumen.semaforo} /> : <span className="text-base font-bold text-cafe-500">Sin stock</span>}
+                {expandido ? <ChevronUp size={28} className="text-cafe-700" aria-hidden /> : <ChevronDown size={28} className="text-cafe-700" aria-hidden />}
+              </div>
+            </button>
+
+            {expandido && (
+              <div className="mt-4 flex flex-col gap-3 border-t-2 border-crema-200 pt-4">
+                {lotesInsumo.length === 0 && <p className="text-lg text-cafe-500">No hay lotes en la despensa.</p>}
+                {lotesInsumo.map((l, indice) => {
+                  const dias = diasRestantes(l.fechaVencimiento, hoy);
+                  return (
+                    <div key={l.id} className="flex items-center justify-between gap-3 rounded-2xl bg-crema-50 p-3">
+                      <div>
+                        <p className="text-lg font-bold text-cafe-900 tabular-nums">{formatearCantidad(l.cantidadDisponible, insumo.unidad)}</p>
+                        <p className="text-base text-cafe-700">
+                          {formatearFechaCorta(l.fechaVencimiento)} · {textoDiasRestantes(dias)}
+                        </p>
+                        {indice === 0 && dias >= 0 && <p className="text-sm font-semibold text-cafe-500">Se usa primero</p>}
+                      </div>
+                      <ChipSemaforo estado={semaforo(l.fechaVencimiento, hoy)} />
+                    </div>
+                  );
+                })}
+
+                {comprando === insumo.id ? (
+                  <FormularioCompra
+                    insumo={insumo}
+                    onCancelar={() => setComprando(null)}
+                    onGuardar={(presentaciones, precio, dias) => {
+                      onRegistrarCompra(insumo.id, presentaciones, precio, dias);
+                      setComprando(null);
+                    }}
+                  />
+                ) : (
+                  <BotonPrincipal onClick={() => setComprando(insumo.id)} icono={<PackagePlus size={24} aria-hidden />}>
+                    Registrar compra
+                  </BotonPrincipal>
+                )}
+              </div>
+            )}
+          </Tarjeta>
+        );
+      })}
+    </div>
+  );
+}
+
+function FormularioCompra({
+  insumo,
+  onGuardar,
+  onCancelar,
+}: {
+  insumo: Insumo;
+  onGuardar: (presentaciones: number, precioPorPresentacion: number, diasVence: number) => void;
+  onCancelar: () => void;
+}) {
+  const [presentaciones, setPresentaciones] = useState(1);
+  const [precio, setPrecio] = useState(insumo.presentacion.precio);
+  const [dias, setDias] = useState(30);
+
+  return (
+    <div className="flex flex-col gap-5 rounded-2xl border-2 border-rosa-300 bg-rosa-100 p-4">
+      <SelectorNumerico
+        etiqueta={`Presentaciones de ${formatearCantidad(insumo.presentacion.cantidad, insumo.unidad)}`}
+        valor={presentaciones}
+        onCambio={setPresentaciones}
+        min={1}
+        max={99}
+        paso={1}
+      />
+      <SelectorNumerico
+        etiqueta="Precio pagado por presentación"
+        valor={precio}
+        onCambio={setPrecio}
+        min={0}
+        max={5000}
+        paso={0.5}
+        formato={formatearBs}
+        ayuda={`Total de la compra: ${formatearBs(precio * presentaciones)}`}
+      />
+      <SelectorNumerico
+        etiqueta="Días hasta que vence"
+        valor={dias}
+        onCambio={setDias}
+        min={0}
+        max={730}
+        paso={1}
+        formato={(v) => `${v} días`}
+      />
+      <BotonPrincipal onClick={() => onGuardar(presentaciones, precio, dias)} icono={<CheckCircle2 size={24} aria-hidden />}>
+        Guardar compra
+      </BotonPrincipal>
+      <BotonPrincipal onClick={onCancelar} variante="suave">
+        Cancelar
+      </BotonPrincipal>
+    </div>
+  );
+}
+
+interface PropsRecetas {
+  recetas: readonly Receta[];
+  insumos: readonly Insumo[];
+  lotes: readonly Lote[];
+  config: ConfiguracionCostos;
+  hoy: FechaISO;
+  onActualizar: (recetaId: Id, cambio: (r: Receta) => Receta) => void;
+  onProducir: (recetaId: Id, veces: number) => void;
+}
+
+function PantallaRecetas({ recetas, insumos, lotes, config, hoy, onActualizar, onProducir }: PropsRecetas) {
+  const [recetaId, setRecetaId] = useState<Id>(recetas[0]?.id ?? '');
+  const [veces, setVeces] = useState(1);
+  const receta = recetas.find((r) => r.id === recetaId);
+  const mapaInsumos = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
+
+  if (!receta) return <p className="text-lg text-cafe-700">Aún no tienes recetas.</p>;
+
+  const costo = calcularCostoReceta(receta, mapaInsumos, config);
+  const cambiar = (cambio: (r: Receta) => Receta) => onActualizar(receta.id, cambio);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Tarjeta>
+        <TituloSeccion>Elige una receta</TituloSeccion>
+        <SelectorOpciones etiqueta="Receta" opciones={recetas} valor={recetaId} onCambio={setRecetaId} />
+      </Tarjeta>
+
+      <Tarjeta>
+        <TituloSeccion>Tiempos y rendimiento</TituloSeccion>
+        <div className="flex flex-col gap-6">
+          <SelectorNumerico
+            etiqueta="Minutos de elaboración y decorado"
+            valor={receta.minutosElaboracion}
+            onCambio={(v) => cambiar((r) => ({ ...r, minutosElaboracion: v }))}
+            min={0}
+            max={600}
+            paso={5}
+            formato={(v) => `${v} min`}
+          />
+          <SelectorNumerico
+            etiqueta="Minutos de horneado"
+            valor={receta.minutosHorneado}
+            onCambio={(v) => cambiar((r) => ({ ...r, minutosHorneado: v }))}
+            min={0}
+            max={600}
+            paso={5}
+            formato={(v) => `${v} min`}
+          />
+          <SelectorNumerico
+            etiqueta="Porciones que rinde"
+            valor={receta.porciones}
+            onCambio={(v) => cambiar((r) => ({ ...r, porciones: v }))}
+            min={1}
+            max={200}
+            paso={1}
+          />
+        </div>
+      </Tarjeta>
+
+      <Tarjeta>
+        <TituloSeccion>Ingredientes</TituloSeccion>
+        <div className="flex flex-col gap-6">
+          {receta.ingredientes.map((ing, indice) => {
+            const insumo = mapaInsumos.get(ing.insumoId);
+            if (!insumo) return null;
+            const estado = resumenInsumo(lotes, insumo.id, hoy).semaforo;
+            return (
+              <div key={`${ing.insumoId}-${indice}`} className="flex flex-col gap-2">
+                {estado === 'amarillo' && (
+                  <span className="self-start">
+                    <ChipSemaforo estado="amarillo" />
+                  </span>
+                )}
+                <SelectorNumerico
+                  etiqueta={insumo.nombre}
+                  valor={ing.cantidad}
+                  onCambio={(v) =>
+                    cambiar((r) => ({
+                      ...r,
+                      ingredientes: r.ingredientes.map((x, i) => (i === indice ? { ...x, cantidad: v } : x)),
+                    }))
+                  }
+                  min={0}
+                  max={insumo.unidad === 'u' ? 60 : 10000}
+                  paso={pasoPorUnidad(insumo.unidad)}
+                  formato={(v) => formatearCantidad(v, insumo.unidad)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </Tarjeta>
+
+      <Tarjeta className="bg-rosa-100 border-rosa-300">
+        <TituloSeccion>Costo de esta receta</TituloSeccion>
+        <FilaMonto etiqueta="Materia prima" valor={costo.mpd} />
+        <FilaMonto etiqueta="Mi mano de obra" valor={costo.mod} />
+        <FilaMonto etiqueta="Luz, agua y gas" valor={costo.cif} />
+        <div className="my-2 border-t-2 border-rosa-300" />
+        <FilaMonto etiqueta="Costo total" valor={costo.total} fuerte />
+        <FilaMonto etiqueta="Costo por porción" valor={costo.unitario} fuerte />
+      </Tarjeta>
+
+      <Tarjeta>
+        <TituloSeccion>Producir</TituloSeccion>
+        <div className="flex flex-col gap-5">
+          <SelectorNumerico
+            etiqueta="Veces que preparo la receta"
+            valor={veces}
+            onCambio={setVeces}
+            min={1}
+            max={20}
+            paso={1}
+            ayuda={`Saldrán ${receta.porciones * veces} porciones`}
+          />
+          <BotonPrincipal onClick={() => onProducir(receta.id, veces)} icono={<Flame size={24} aria-hidden />}>
+            Producir y descontar
+          </BotonPrincipal>
+        </div>
+      </Tarjeta>
+    </div>
+  );
+}
+
+function PantallaCostos({
+  config,
+  onCambiar,
+}: {
+  config: ConfiguracionCostos;
+  onCambiar: (cambio: (c: ConfiguracionCostos) => ConfiguracionCostos) => void;
+}) {
+  const tasaMOD = tasaMinutoMOD(config);
+  const tasaCIF = tasaMinutoCIF(config);
+  const horasSemana = redondear(config.horasTrabajoMes / (52 / 12), 1);
+  const servicio = (clave: keyof ConfiguracionCostos['servicios']) => (v: number) =>
+    onCambiar((c) => ({ ...c, servicios: { ...c.servicios, [clave]: v } }));
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Tarjeta>
+        <TituloSeccion>Mi mano de obra</TituloSeccion>
+        <p className="mb-4 text-lg text-cafe-700">
+          Sueldo de referencia: <strong className="text-cafe-900">{formatearBs(config.sueldoMensual)}</strong> al mes
+          (salario mínimo nacional).
+        </p>
+        <SelectorNumerico
+          etiqueta="Horas que trabajo al mes en repostería"
+          valor={config.horasTrabajoMes}
+          onCambio={(v) => onCambiar((c) => ({ ...c, horasTrabajoMes: v }))}
+          min={1}
+          max={Math.min(300, HORAS_MES_MAXIMO)}
+          paso={1}
+          formato={(v) => `${v} h`}
+          ayuda={`Aproximadamente ${formatoNumero.format(horasSemana)} horas por semana`}
+        />
+        <div className="mt-5 flex items-center gap-3 rounded-2xl bg-rosa-100 p-4">
+          <Clock size={30} className="shrink-0 text-cafe-700" aria-hidden />
+          <p className="text-lg text-cafe-900">
+            Cada minuto de tu trabajo vale <strong>{formatearBs(tasaMOD)}</strong>
+          </p>
+        </div>
+      </Tarjeta>
+
+      <Tarjeta>
+        <TituloSeccion>Servicios del mes</TituloSeccion>
+        <div className="flex flex-col gap-6">
+          <SelectorNumerico etiqueta="Luz" valor={config.servicios.luz} onCambio={servicio('luz')} min={0} max={3000} paso={5} formato={formatearBs} />
+          <SelectorNumerico etiqueta="Agua" valor={config.servicios.agua} onCambio={servicio('agua')} min={0} max={3000} paso={5} formato={formatearBs} />
+          <SelectorNumerico etiqueta="Gas (garrafas o red)" valor={config.servicios.gas} onCambio={servicio('gas')} min={0} max={3000} paso={5} formato={formatearBs} />
+        </div>
+        <div className="mt-5 flex items-center gap-3 rounded-2xl bg-rosa-100 p-4">
+          <Flame size={30} className="shrink-0 text-cafe-700" aria-hidden />
+          <p className="text-lg text-cafe-900">
+            Cada minuto en la cocina consume <strong>{formatearBs(tasaCIF)}</strong> en servicios
+          </p>
+        </div>
+      </Tarjeta>
+    </div>
+  );
+}
+
+function PantallaCotizador({
+  recetas,
+  insumos,
+  config,
+}: {
+  recetas: readonly Receta[];
+  insumos: readonly Insumo[];
+  config: ConfiguracionCostos;
+}) {
+  const [recetaId, setRecetaId] = useState<Id>(recetas[0]?.id ?? '');
+  const [porciones, setPorciones] = useState<number>(recetas[0]?.porciones ?? 1);
+  const [margen, setMargen] = useState(30);
+  const mapaInsumos = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
+  const receta = recetas.find((r) => r.id === recetaId);
+
+  if (!receta) return <p className="text-lg text-cafe-700">Aún no tienes recetas para cotizar.</p>;
+
+  const q = cotizar(receta, mapaInsumos, config, porciones, margen / 100);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Tarjeta>
+        <TituloSeccion>¿Qué te pidieron?</TituloSeccion>
+        <SelectorOpciones
+          etiqueta="Producto"
+          opciones={recetas}
+          valor={recetaId}
+          onCambio={(id) => {
+            setRecetaId(id);
+            const elegida = recetas.find((r) => r.id === id);
+            if (elegida) setPorciones(elegida.porciones);
+          }}
+        />
+      </Tarjeta>
+
+      <Tarjeta>
+        <div className="flex flex-col gap-6">
+          <SelectorNumerico etiqueta="Porciones" valor={porciones} onCambio={setPorciones} min={1} max={500} paso={1} />
+          <SelectorNumerico
+            etiqueta="Mi ganancia sobre el precio"
+            valor={margen}
+            onCambio={setMargen}
+            min={0}
+            max={90}
+            paso={5}
+            formato={(v) => `${v} %`}
+          />
+        </div>
+      </Tarjeta>
+
+      <Tarjeta className="border-cafe-700 bg-rosa-200">
+        <p className="text-lg font-semibold text-cafe-700">Precio para tu cliente</p>
+        <p className="text-5xl font-black text-cafe-900 tabular-nums">{formatearBs(q.precioTotal)}</p>
+        <p className="mt-1 text-lg text-cafe-700">{formatearBs(q.precioUnitarioComercial)} por porción</p>
+        <div className="my-3 border-t-2 border-rosa-400" />
+        <FilaMonto etiqueta="Mi costo" valor={q.costoTotal} />
+        <FilaMonto etiqueta="Mi ganancia" valor={q.gananciaTotal} fuerte />
+        <p className="mt-2 text-sm text-cafe-500">Precio redondeado hacia arriba a Bs 0,50. El cliente no ve tus costos.</p>
+      </Tarjeta>
+    </div>
+  );
+}
+
+export default function App() {
+  const hoy = useHoy();
+  const [seccion, setSeccion] = useState<Seccion>('inventario');
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const [insumos, setInsumos] = useState<readonly Insumo[]>(INSUMOS_DEMO);
+  const [lotes, setLotes] = useState<readonly Lote[]>(() => crearLotesDemo(fechaLocalISO(new Date())));
+  const [recetas, setRecetas] = useState<readonly Receta[]>(RECETAS_DEMO);
+  const [config, setConfig] = useState<ConfiguracionCostos>(CONFIGURACION_DEMO);
+  const [mermaAcumulada, setMermaAcumulada] = useState(0);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
+
+  const cerrarAviso = useCallback(() => setAviso(null), []);
+  const mapaInsumos = useMemo(() => new Map(insumos.map((i) => [i.id, i])), [insumos]);
 
   useEffect(() => {
     if (!menuAbierto) return;
@@ -797,132 +761,158 @@ export default function App() {
     return () => window.removeEventListener('keydown', alPresionar);
   }, [menuAbierto]);
 
-  const nombreInsumo = (id: string) => insumos.find((i) => i.id === id)?.nombre ?? id;
-  const actual = VISTAS.find((v) => v.id === vista) ?? VISTAS[0]!;
+  const irA = (s: Seccion) => {
+    setSeccion(s);
+    setMenuAbierto(false);
+    window.scrollTo({ top: 0 });
+  };
 
-  const manejarProduccion = (receta: Receta, factor: number) => {
-    const r = producir(receta, insumos, lotes, hoy, factor);
-    if (r.ok) {
-      setLotes(r.valor.lotes);
-      setAviso({ tipo: 'ok', texto: `${receta.nombre} ×${factor}: stock descontado (${fmtBs(r.valor.costoMPD)} en insumos).` });
-    } else {
-      setAviso({
-        tipo: 'error',
-        texto: `No se descontó nada. Falta: ${r.error.faltantes.map((f) => nombreInsumo(f.insumoId)).join(', ')}.`,
+  const registrar = (insumoId: Id, presentaciones: number, precioPorPresentacion: number, diasVence: number) => {
+    const insumo = mapaInsumos.get(insumoId);
+    if (!insumo) return;
+    try {
+      const lote = registrarCompra(insumo, {
+        id: nuevoId(`L-${insumoId}`),
+        presentaciones,
+        precioPagado: precioPorPresentacion * presentaciones,
+        fechaIngreso: hoy,
+        fechaVencimiento: sumarDias(hoy, diasVence),
       });
+      setLotes((ls) => [...ls, lote]);
+      setInsumos((is) =>
+        is.map((i) => (i.id === insumoId ? { ...i, presentacion: { ...i.presentacion, precio: precioPorPresentacion } } : i)),
+      );
+      setAviso({ tipo: 'exito', texto: `Compra de ${insumo.nombre} guardada. Tus recetas ya usan el nuevo precio.` });
+    } catch (e) {
+      setAviso({ tipo: 'error', texto: e instanceof Error ? e.message : 'No se pudo guardar la compra.' });
     }
   };
 
-  const manejarBaja = () => {
-    const r = darDeBajaVencidos(lotes, hoy);
-    setLotes(r.lotes);
-    setAviso({ tipo: 'ok', texto: `${r.bajas.length} lote(s) dados de baja · merma de ${fmtBs(r.costoTotal)}.` });
+  const darDeBaja = () => {
+    const resultado = darDeBajaVencidos(lotes, hoy);
+    if (resultado.mermas.length === 0) return;
+    setLotes(resultado.lotes);
+    setMermaAcumulada((m) => m + resultado.valorTotal);
+    setAviso({ tipo: 'exito', texto: `Merma registrada: ${formatearBs(resultado.valorTotal)}.` });
   };
 
+  const actualizarReceta = (recetaId: Id, cambio: (r: Receta) => Receta) =>
+    setRecetas((rs) => rs.map((r) => (r.id === recetaId ? cambio(r) : r)));
+
+  const producirReceta = (recetaId: Id, veces: number) => {
+    const receta = recetas.find((r) => r.id === recetaId);
+    if (!receta) return;
+    const resultado = producir({ lotes, receta, insumos: mapaInsumos, veces, hoy });
+    if (resultado.ok) {
+      setLotes(resultado.valor.lotes);
+      setAviso({
+        tipo: 'exito',
+        texto: `¡Listo! ${resultado.valor.unidadesProducidas} porciones de ${receta.nombre}. Materia prima usada: ${formatearBs(resultado.valor.costoMPDReal)}.`,
+      });
+      return;
+    }
+    const { error } = resultado;
+    if (error.tipo === 'INSUMO_DESCONOCIDO') {
+      setAviso({ tipo: 'error', texto: 'La receta usa un insumo que ya no existe.' });
+      return;
+    }
+    const detalle = error.faltantes
+      .map((f) => {
+        const insumo = mapaInsumos.get(f.insumoId);
+        return insumo ? `${insumo.nombre} (faltan ${formatearCantidad(f.faltante, insumo.unidad)})` : f.insumoId;
+      })
+      .join(', ');
+    setAviso({ tipo: 'error', texto: `No alcanza: ${detalle}. No se descontó nada.` });
+  };
+
+  const actual = SECCIONES.find((s) => s.id === seccion) ?? SECCIONES[0]!;
+
   return (
-    <div className="min-h-dvh bg-stone-50 text-stone-800">
-      <header className="sticky top-0 z-20 flex items-center gap-3 border-b-2 border-rose-200 bg-rose-100 px-4 py-2">
+    <div className="min-h-dvh bg-crema-50 text-cafe-900">
+      <header className="sticky top-0 z-20 flex items-center gap-3 border-b-2 border-crema-200 bg-crema-50/95 px-4 py-3 backdrop-blur">
         <button
           type="button"
           onClick={() => setMenuAbierto(true)}
           aria-label="Abrir menú"
           aria-expanded={menuAbierto}
-          className="btn-tactil grid size-14 place-items-center rounded-2xl bg-rose-300 text-amber-950 active:bg-rose-400"
+          aria-controls="menu-principal"
+          className="boton-tactil flex size-14 items-center justify-center rounded-2xl border-2 border-rosa-400 bg-rosa-200 text-cafe-900"
         >
-          <Menu className="size-8" strokeWidth={2.5} />
+          <Menu size={30} strokeWidth={2.5} aria-hidden />
         </button>
         <div className="min-w-0">
-          <p className="text-sm font-bold uppercase tracking-wider text-rose-700">GustoDulce</p>
-          <h1 className="truncate text-xl font-black text-amber-900">{actual.titulo}</h1>
+          <p className="flex items-center gap-1.5 text-sm font-bold tracking-wide text-cafe-500 uppercase">
+            <Cake size={16} aria-hidden /> GustoDulce
+          </p>
+          <h1 className="truncate text-2xl font-black text-cafe-900">{actual.titulo}</h1>
         </div>
       </header>
 
       {menuAbierto && (
-        <div className="fixed inset-0 z-30 flex" role="dialog" aria-modal="true" aria-label="Menú principal">
-          <nav className="flex w-80 max-w-[85vw] flex-col gap-3 bg-rose-50 p-4 shadow-2xl">
+        <div className="fixed inset-0 z-30 flex">
+          <nav id="menu-principal" aria-label="Menú principal" className="flex w-[82%] max-w-sm flex-col gap-3 bg-crema-100 p-4 shadow-xl">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-2xl font-black text-amber-900">GustoDulce</p>
+              <span className="flex items-center gap-2 text-2xl font-black text-cafe-900">
+                <Cake size={28} aria-hidden /> GustoDulce
+              </span>
               <button
                 type="button"
                 onClick={() => setMenuAbierto(false)}
                 aria-label="Cerrar menú"
-                className="btn-tactil grid size-14 place-items-center rounded-2xl bg-rose-200 text-amber-950 active:bg-rose-300"
+                className="boton-tactil flex size-14 items-center justify-center rounded-2xl text-cafe-900"
               >
-                <X className="size-8" strokeWidth={2.5} />
+                <X size={30} aria-hidden />
               </button>
             </div>
-            {VISTAS.map(({ id, titulo, icono: Icono }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setVista(id);
-                  setMenuAbierto(false);
-                }}
-                aria-current={vista === id ? 'page' : undefined}
-                className={`btn-tactil flex min-h-16 items-center gap-4 rounded-2xl border-2 px-4 text-left text-lg font-extrabold ${
-                  vista === id ? 'border-rose-400 bg-rose-300 text-amber-950' : 'border-rose-200 bg-rose-100 text-amber-900 active:bg-rose-200'
-                }`}
-              >
-                <Icono className="size-7 shrink-0" />
-                {titulo}
-              </button>
-            ))}
-            <p className="mt-auto text-sm text-stone-600">Hoy: {fmtFecha(hoy)}</p>
+            {SECCIONES.map(({ id, titulo, icono: Icono }) => {
+              const activo = id === seccion;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => irA(id)}
+                  aria-current={activo ? 'page' : undefined}
+                  className={`boton-tactil flex min-h-16 items-center gap-4 rounded-2xl border-2 px-4 text-left text-lg font-bold ${
+                    activo ? 'border-cafe-700 bg-rosa-200 text-cafe-900' : 'border-transparent bg-crema-50 text-cafe-700'
+                  }`}
+                >
+                  <Icono size={28} aria-hidden />
+                  {titulo}
+                </button>
+              );
+            })}
           </nav>
-          <button type="button" aria-label="Cerrar menú" className="flex-1 bg-stone-900/40" onClick={() => setMenuAbierto(false)} />
+          <button type="button" aria-label="Cerrar menú" onClick={() => setMenuAbierto(false)} className="flex-1 bg-cafe-900/40" />
         </div>
       )}
 
-      <main className="mx-auto max-w-xl px-4 pt-4 pb-28">
-        {vista === 'inventario' && (
-          <VistaInventario
+      <main className="mx-auto max-w-lg px-4 pt-4 pb-32">
+        {seccion === 'inventario' && (
+          <PantallaInventario
             insumos={insumos}
             lotes={lotes}
             hoy={hoy}
-            onAgregarLote={(l) => {
-              setLotes((ls) => [...ls, l]);
-              setAviso({ tipo: 'ok', texto: `Lote de ${nombreInsumo(l.insumoId)} registrado.` });
-            }}
-            onDarDeBaja={manejarBaja}
+            mermaAcumulada={mermaAcumulada}
+            onRegistrarCompra={registrar}
+            onDarDeBaja={darDeBaja}
           />
         )}
-        {vista === 'recetas' && (
-          <VistaRecetas
-            insumos={insumos}
-            lotes={lotes}
+        {seccion === 'recetas' && (
+          <PantallaRecetas
             recetas={recetas}
+            insumos={insumos}
+            lotes={lotes}
+            config={config}
             hoy={hoy}
-            onActualizarReceta={(r) => setRecetas((rs) => rs.map((x) => (x.id === r.id ? r : x)))}
-            onProducir={manejarProduccion}
+            onActualizar={actualizarReceta}
+            onProducir={producirReceta}
           />
         )}
-        {vista === 'servicios' && (
-          <VistaServicios
-            servicios={servicios}
-            onCambiarMonto={(id, monto) => setServicios((ss) => ss.map((s) => (s.id === id ? { ...s, montoMensual: monto } : s)))}
-          />
-        )}
-        {vista === 'cotizador' && (
-          <VistaCotizador insumos={insumos} lotes={lotes} recetas={recetas} servicios={servicios} hoy={hoy} onAviso={setAviso} />
-        )}
+        {seccion === 'costos' && <PantallaCostos config={config} onCambiar={setConfig} />}
+        {seccion === 'cotizador' && <PantallaCotizador recetas={recetas} insumos={insumos} config={config} />}
       </main>
 
-      {aviso && (
-        <div
-          role="status"
-          className={`fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-xl items-start gap-3 rounded-2xl border-2 p-4 text-base font-bold shadow-xl ${
-            aviso.tipo === 'ok' ? 'border-emerald-400 bg-emerald-100 text-emerald-950' : 'border-red-400 bg-red-100 text-red-950'
-          }`}
-        >
-          {aviso.tipo === 'ok' ? <CheckCircle2 className="size-6 shrink-0" /> : <AlertTriangle className="size-6 shrink-0" />}
-          <span className="flex-1">{aviso.texto}</span>
-          <button type="button" aria-label="Cerrar aviso" onClick={() => setAviso(null)} className="btn-tactil -m-2 grid size-12 place-items-center rounded-xl">
-            <X className="size-6" />
-          </button>
-        </div>
-      )}
-      {import.meta.env.DEV && <PanelPruebaFEFO />}
+      <AvisoFlotante aviso={aviso} onCerrar={cerrarAviso} />
     </div>
   );
 }

@@ -1,9 +1,9 @@
 /**
- * Punto de entrada único del dominio GustoDulce.
- * La capa de presentación importa SOLO desde aquí: `import { ... } from './domain'`.
+ * GustoDulce · Dominio · Punto de entrada único.
+ * La capa de presentación importa SIEMPRE desde aquí, nunca de archivos internos.
  */
 export * from './tipos';
 export * from './numeros';
 export * from './fechas';
-export * from './inventario';
 export * from './costeo';
+export * from './inventario';

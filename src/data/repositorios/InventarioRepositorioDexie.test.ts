@@ -1,4 +1,4 @@
-import 'fake-indexeddb/auto'; // IndexedDB en memoria para Node — debe ir primero
+import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { db, aRegistro } from '../db';
@@ -31,7 +31,7 @@ async function saldos(): Promise<Record<string, number>> {
 beforeEach(async () => {
   await db.delete();
   await db.open();
-  // Insertados fuera de orden a propósito: el orden FEFO lo da el índice.
+
   await db.lotes_inventario.bulkPut([
     aRegistro(lote('C', '2026-12-30', 500, 0.014)),
     aRegistro(lote('A', '2026-11-06', 1000, 0.012)),
@@ -69,7 +69,6 @@ describe('descontarFEFO', () => {
       repo.descontarFEFO(INSUMO, 800, planificadorReferencia, 'pedido 3'),
     ]);
 
-    // 2500 g disponibles: caben 3 × 800 = 2400
     expect(resultados.every((r) => r.ok)).toBe(true);
     expect(await saldos()).toEqual({ A: 0, B: 0, C: 100 });
 
@@ -97,7 +96,7 @@ describe('aplicarPlanSalida (atomicidad)', () => {
     const r = await repo.aplicarPlanSalida(
       plan([
         { loteId: 'A', cantidad: 1000, costoUnitario: 0.012, costo: 12 },
-        { loteId: 'C', cantidad: 600, costoUnitario: 0.014, costo: 8.4 }, // C solo tiene 500
+        { loteId: 'C', cantidad: 600, costoUnitario: 0.014, costo: 8.4 },
       ]),
       'prueba',
     );
@@ -130,7 +129,7 @@ describe('aplicarPlanSalida (atomicidad)', () => {
     const r = await repo.aplicarPlanSalida(
       plan([
         { loteId: 'C', cantidad: 300, costoUnitario: 0.014, costo: 4.2 },
-        { loteId: 'C', cantidad: 300, costoUnitario: 0.014, costo: 4.2 }, // 600 > 500
+        { loteId: 'C', cantidad: 300, costoUnitario: 0.014, costo: 4.2 },
       ]),
       'prueba',
     );
@@ -139,7 +138,7 @@ describe('aplicarPlanSalida (atomicidad)', () => {
   });
 
   it('normaliza residuos de punto flotante a 0', async () => {
-    // 0.1 + 0.2 = 0.30000000000000004
+
     await db.lotes_inventario.put(aRegistro(lote('F', '2026-11-04', 0.3, 1)));
     const r = await repo.aplicarPlanSalida(
       plan([

@@ -1,5 +1,3 @@
-
-
 import { ErrorDominio, HORAS_MES_MAXIMO } from './tipos';
 import type { ConfiguracionCostos, Id, Insumo, Receta } from './tipos';
 import {

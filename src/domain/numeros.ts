@@ -1,5 +1,3 @@
-
-
 import { ErrorDominio } from './tipos';
 
 export const TOLERANCIA = 1e-9;

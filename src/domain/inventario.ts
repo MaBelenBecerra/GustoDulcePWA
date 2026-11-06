@@ -1,5 +1,3 @@
-
-
 import { cantidadBruta } from './costeo';
 import { compararFechas, diasRestantes, semaforo, SEVERIDAD_SEMAFORO } from './fechas';
 import { asegurarNoNegativo, asegurarPositivo, sumaPrecisa, TOLERANCIA } from './numeros';

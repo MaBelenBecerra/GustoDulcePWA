@@ -1,5 +1,3 @@
-
-
 export * from './tipos';
 export * from './numeros';
 export * from './fechas';

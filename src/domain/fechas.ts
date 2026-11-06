@@ -1,5 +1,3 @@
-
-
 import { ErrorDominio, UMBRAL_AMARILLO_DIAS } from './tipos';
 import type { FechaISO, Semaforo } from './tipos';
 

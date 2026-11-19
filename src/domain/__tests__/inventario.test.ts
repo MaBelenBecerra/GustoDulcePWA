@@ -17,6 +17,7 @@ const harina: Insumo = { id: 'harina', nombre: 'Harina', unidad: 'g', presentaci
 const huevo: Insumo = { id: 'huevo', nombre: 'Huevo', unidad: 'u', presentacion: { cantidad: 30, precio: 30 }, merma: 0 };
 const insumos = new Map([harina, huevo].map((i) => [i.id, i]));
 
+
 const loteA: Lote = { id: 'A', insumoId: 'harina', cantidadInicial: 300, cantidadDisponible: 300, costoUnitario: 0.01, fechaIngreso: '2026-10-01', fechaVencimiento: '2026-11-20' };
 
 const loteB: Lote = { id: 'B', insumoId: 'harina', cantidadInicial: 200, cantidadDisponible: 200, costoUnitario: 0.012, fechaIngreso: '2026-10-20', fechaVencimiento: '2026-11-08' };

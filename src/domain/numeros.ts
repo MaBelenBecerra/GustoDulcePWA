@@ -1,6 +1,15 @@
+
+
+
+
+
+
+
 import { ErrorDominio } from './tipos';
 
+
 export const TOLERANCIA = 1e-9;
+
 
 export function asegurarFinito(valor: number, campo: string): number {
   if (typeof valor !== 'number' || !Number.isFinite(valor)) {
@@ -8,6 +17,7 @@ export function asegurarFinito(valor: number, campo: string): number {
   }
   return valor;
 }
+
 
 export function asegurarNoNegativo(valor: number, campo: string): number {
   asegurarFinito(valor, campo);
@@ -17,6 +27,7 @@ export function asegurarNoNegativo(valor: number, campo: string): number {
   return valor;
 }
 
+
 export function asegurarPositivo(valor: number, campo: string): number {
   asegurarFinito(valor, campo);
   if (valor <= 0) {
@@ -24,6 +35,10 @@ export function asegurarPositivo(valor: number, campo: string): number {
   }
   return valor;
 }
+
+
+
+
 
 export function redondear(valor: number, decimales = 2): number {
   asegurarFinito(valor, 'valor a redondear');
@@ -36,6 +51,10 @@ export function redondear(valor: number, decimales = 2): number {
   return resultado === 0 ? 0 : resultado;
 }
 
+
+
+
+
 export function redondearAlAlza(valor: number, paso = 0.5): number {
   asegurarNoNegativo(valor, 'valor');
   asegurarPositivo(paso, 'paso');
@@ -44,18 +63,25 @@ export function redondearAlAlza(valor: number, paso = 0.5): number {
   return redondear(entero * paso, 2);
 }
 
+
 export function casiIgual(a: number, b: number, tol = TOLERANCIA): boolean {
   return Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
 }
+
 
 export function esCasiCero(valor: number, tol = TOLERANCIA): boolean {
   return Math.abs(valor) <= tol;
 }
 
+
 export function limitar(valor: number, min: number, max: number): number {
   if (min > max) throw new ErrorDominio('NUMERO_INVALIDO', 'min no puede superar a max.');
   return Math.min(max, Math.max(min, valor));
 }
+
+
+
+
 
 export function sumaPrecisa(valores: readonly number[]): number {
   let suma = 0;
@@ -73,6 +99,7 @@ const formatoBs = new Intl.NumberFormat('es-BO', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+
 
 export function formatearBs(valor: number): string {
   return `Bs ${formatoBs.format(redondear(valor, 2))}`;

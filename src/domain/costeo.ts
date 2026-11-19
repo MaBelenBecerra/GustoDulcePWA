@@ -1,3 +1,17 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { ErrorDominio, HORAS_MES_MAXIMO } from './tipos';
 import type { ConfiguracionCostos, Id, Insumo, Receta } from './tipos';
 import {
@@ -8,6 +22,8 @@ import {
   redondearAlAlza,
   sumaPrecisa,
 } from './numeros';
+
+
 
 export function validarInsumo(insumo: Insumo): void {
   asegurarPositivo(insumo.presentacion.cantidad, `Presentación de ${insumo.nombre}`);
@@ -41,10 +57,14 @@ export function validarConfiguracion(config: ConfiguracionCostos): void {
   asegurarNoNegativo(config.servicios.gas, 'Monto de gas');
 }
 
+
+
+
 export function costoPorUnidadBase(insumo: Insumo): number {
   validarInsumo(insumo);
   return insumo.presentacion.precio / (insumo.presentacion.cantidad * (1 - insumo.merma));
 }
+
 
 export function cantidadBruta(neta: number, merma: number): number {
   asegurarNoNegativo(neta, 'Cantidad neta');
@@ -66,6 +86,7 @@ export interface DetalleMPD {
   readonly lineas: readonly LineaMPD[];
 }
 
+
 export function calcularMPD(receta: Receta, insumos: ReadonlyMap<Id, Insumo>): DetalleMPD {
   const lineas = receta.ingredientes.map((ing): LineaMPD => {
     const insumo = insumos.get(ing.insumoId);
@@ -83,10 +104,14 @@ export function calcularMPD(receta: Receta, insumos: ReadonlyMap<Id, Insumo>): D
   return { total: sumaPrecisa(lineas.map((l) => l.costo)), lineas };
 }
 
+
+
+
 export function tasaMinutoMOD(config: ConfiguracionCostos): number {
   validarConfiguracion(config);
   return config.sueldoMensual / (60 * config.horasTrabajoMes);
 }
+
 
 export function minutosReceta(receta: Receta): number {
   return receta.minutosElaboracion + receta.minutosHorneado;
@@ -96,6 +121,9 @@ export function calcularMOD(receta: Receta, config: ConfiguracionCostos): number
   validarReceta(receta);
   return tasaMinutoMOD(config) * minutosReceta(receta);
 }
+
+
+
 
 export function tasaMinutoCIF(config: ConfiguracionCostos): number {
   validarConfiguracion(config);
@@ -107,6 +135,8 @@ export function calcularCIF(receta: Receta, config: ConfiguracionCostos): number
   validarReceta(receta);
   return tasaMinutoCIF(config) * minutosReceta(receta);
 }
+
+
 
 export interface CostoReceta {
   readonly mpd: number;
@@ -138,6 +168,9 @@ export function calcularCostoReceta(
     lineasMPD: detalle.lineas,
   };
 }
+
+
+
 
 export function precioSugerido(costoUnitario: number, margen: number): number {
   asegurarNoNegativo(costoUnitario, 'Costo unitario');

@@ -1,0 +1,108 @@
+# OpenTelemetry Fetch Instrumentation for web
+
+[![NPM Published Version][npm-img]][npm-url]
+[![Apache License][license-image]][license-image]
+
+> [!NOTE]
+> `@opentelemetry/instrumentation-fetch` is deprecated.
+> Vendors and users should plan moving to [instrumentations being developed in the opentelemetry-browser repository](https://github.com/open-telemetry/opentelemetry-browser/tree/main/packages/instrumentation#readme),
+> specifically [`@opentelemetry/browser-instrumentation/experimental/fetch`](https://github.com/open-telemetry/opentelemetry-browser/tree/main/packages/instrumentation#fetch).
+> Note that while the `@opentelemetry/browser-instrumentation` instrumentations cover the same Browser technologies, the emitted telemetry differs significantly.
+
+This module provides auto instrumentation for web using [fetch](https://developer.mozilla.org/en-US/docs/Web/API/fetch).
+(Note: This instrumentation does **not** instrument [Node.js' fetch](https://nodejs.org/api/globals.html#fetch). See [`@opentelemetry/instrumentation-undici`](https://github.com/open-telemetry/opentelemetry-js-contrib/tree/main/packages/instrumentation-undici) for that.)
+
+## Installation
+
+```bash
+npm install --save @opentelemetry/instrumentation-fetch
+```
+
+## Usage
+
+```js
+import { context, trace } from '@opentelemetry/api';
+import {
+  ConsoleSpanExporter,
+  SimpleSpanProcessor,
+  TracerProvider,
+} from '@opentelemetry/sdk-trace';
+import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
+import { ZoneContextManager } from '@opentelemetry/context-zone';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
+
+const provider = new TracerProvider({
+  spanProcessors: [new SimpleSpanProcessor(new ConsoleSpanExporter())]
+});
+
+context.setGlobalContextManager(new ZoneContextManager().enable());
+trace.setGlobalTracerProvider(provider);
+
+registerInstrumentations({
+  instrumentations: [new FetchInstrumentation()],
+});
+
+// or plugin can be also initialised separately and then set the tracer provider or meter provider
+const fetchInstrumentation = new FetchInstrumentation();
+const provider = new TracerProvider({
+  spanProcessors: [new SimpleSpanProcessor(new ConsoleSpanExporter())]
+});
+context.setGlobalContextManager(new ZoneContextManager().enable());
+trace.setGlobalTracerProvider(provider);
+fetchInstrumentation.setTracerProvider(provider);
+
+// and some test
+
+fetch('http://localhost:8090/fetch.js');
+
+```
+
+## Example Screenshots
+
+![Screenshot of the running example](images/trace1.png)
+![Screenshot of the running example](images/trace2.png)
+![Screenshot of the running example](images/trace3.png)
+
+See [examples/opentelemetry-web](https://github.com/open-telemetry/opentelemetry-js/tree/main/examples/opentelemetry-web) for a short example.
+
+### Fetch Instrumentation options
+
+Fetch instrumentation plugin has few options available to choose from. You can set the following:
+
+| Options                                                                                                                                                                  | Type                           | Description                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`applyCustomAttributesOnSpan`](https://github.com/open-telemetry/opentelemetry-js/blob/main/experimental/packages/opentelemetry-instrumentation-fetch/src/fetch.ts#L83) | `FetchCustomAttributeFunction` | Function for adding custom attributes                                                                                                                                                                                                                                                                 |
+| [`requestHook`](https://github.com/open-telemetry/opentelemetry-js/blob/main/experimental/packages/opentelemetry-instrumentation-fetch/src/fetch.ts#L85)                 | `FetchRequestHookFunction`     | Function for adding custom attributes or headers before the request is handled                                                                                                                                                                                                                        |
+| [`ignoreNetworkEvents`](https://github.com/open-telemetry/opentelemetry-js/blob/main/experimental/packages/opentelemetry-instrumentation-fetch/src/fetch.ts#L87)         | `boolean`                      | Disable network events being added as span events (network events are added by default)                                                                                                                                                                                                               |
+| [`measureRequestSize`](https://github.com/open-telemetry/opentelemetry-js/blob/main/experimental/packages/opentelemetry-instrumentation-fetch/src/fetch.ts#L89)          | `boolean`                      | Measure outgoing request length (outgoing request length is not measured by default)                                                                                                                                                                                                                  |
+
+## Semantic Conventions
+
+The `instrumentation-fetch` versions v0.220.0 and later emit the stable v1.23.0+ semantic conventions.
+
+**Span attributes:**
+
+| v1.23.0 semconv                    | Notes                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http.request.method`              | HTTP request method. With v1.23.0 semconv [`http.request.method_original` may also be included](https://github.com/open-telemetry/semantic-conventions/blob/v1.23.1/docs/http/http-spans.md#common-attributes).                                                                             |
+| `url.full`                         | Full HTTP request URL                                                                                                                                                                                                                                                                       |
+| `server.address` and `server.port` | The hostname and port of the request URL                                                                                                                                                                                                                                                    |
+| `http.response.status_code`        | HTTP response status code                                                                                                                                                                                                                                                                   |
+| `http.request.body.size`           | This is only added if `measureRequestSize` is `true`.                                                                                                                                                                                                                                       |
+| `error.type`                       | The response status (as a string), if the response status was `>=400`.                                                                                                                                                                                                                      |
+
+## Useful links
+
+- For more information on OpenTelemetry, visit: <https://opentelemetry.io/>
+- For more about OpenTelemetry JavaScript: <https://github.com/open-telemetry/opentelemetry-js>
+- For help or feedback on this project, join us in [GitHub Discussions][discussions-url]
+
+## License
+
+Apache 2.0 - See [LICENSE][license-url] for more information.
+
+[discussions-url]: https://github.com/open-telemetry/opentelemetry-js/discussions
+[license-url]: https://github.com/open-telemetry/opentelemetry-js/blob/main/LICENSE
+[license-image]: https://img.shields.io/badge/license-Apache_2.0-green.svg?style=flat
+[npm-url]: https://www.npmjs.com/package/@opentelemetry/instrumentation-fetch
+[npm-img]: https://badge.fury.io/js/%40opentelemetry%2Finstrumentation-fetch.svg

@@ -1,0 +1,17 @@
+{
+  "name": "GustoDulce · Costos e inventario",
+  "short_name": "GustoDulce",
+  "description": "Costeo ABC, inventario FEFO y cotizaciones para repostería artesanal. Funciona sin internet.",
+  "lang": "es-BO",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FBF4EA",
+  "theme_color": "#FBF4EA",
+  "icons": [
+    { "src": "/iconos/icono-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/iconos/icono-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/iconos/icono-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

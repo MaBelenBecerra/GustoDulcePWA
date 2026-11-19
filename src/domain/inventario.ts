@@ -1,8 +1,26 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { cantidadBruta } from './costeo';
 import { compararFechas, diasRestantes, semaforo, SEVERIDAD_SEMAFORO } from './fechas';
 import { asegurarNoNegativo, asegurarPositivo, sumaPrecisa, TOLERANCIA } from './numeros';
 import { ErrorDominio, exito, fallo } from './tipos';
 import type { FechaISO, Id, Insumo, Lote, Receta, Resultado, Semaforo } from './tipos';
+
+
+
 
 export interface EstrategiaConsumo {
   readonly nombre: string;
@@ -11,6 +29,10 @@ export interface EstrategiaConsumo {
 }
 
 const compararTexto = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+
+
+
 
 export const estrategiaFEFO: EstrategiaConsumo = {
   nombre: 'FEFO',
@@ -30,6 +52,8 @@ export const estrategiaFEFO: EstrategiaConsumo = {
       );
   },
 };
+
+
 
 export interface Asignacion {
   readonly loteId: Id;
@@ -53,6 +77,7 @@ export interface Faltante {
   readonly faltante: number;
 }
 
+
 export function planificarConsumo(
   lotes: readonly Lote[],
   insumoId: Id,
@@ -71,6 +96,7 @@ export function planificarConsumo(
     restante -= x;
   }
 
+
   if (restante > TOLERANCIA * Math.max(1, cantidad)) {
     const disponible = cantidad - restante;
     return fallo({ insumoId, requerido: cantidad, disponible, faltante: restante });
@@ -82,6 +108,7 @@ export function planificarConsumo(
     costoTotal: sumaPrecisa(asignaciones.map((a) => a.costo)),
   });
 }
+
 
 export function aplicarPlanes(lotes: readonly Lote[], planes: readonly PlanConsumo[]): Lote[] {
   const descuento = new Map<Id, number>();
@@ -101,6 +128,8 @@ export function aplicarPlanes(lotes: readonly Lote[], planes: readonly PlanConsu
     return { ...lote, cantidadDisponible: nuevo <= TOLERANCIA ? 0 : nuevo };
   });
 }
+
+
 
 export type ErrorProduccion =
   | { readonly tipo: 'STOCK_INSUFICIENTE'; readonly faltantes: readonly Faltante[] }
@@ -123,6 +152,11 @@ export interface SolicitudProduccion {
   readonly hoy: FechaISO;
   readonly estrategia?: EstrategiaConsumo;
 }
+
+
+
+
+
 
 export function consumoBrutoReceta(
   receta: Receta,
@@ -148,6 +182,7 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
   const consumo = consumoBrutoReceta(receta, insumos, veces);
   if (!consumo.ok) return consumo;
 
+
   const planes: PlanConsumo[] = [];
   const faltantes: Faltante[] = [];
   for (const [insumoId, cantidad] of consumo.valor) {
@@ -157,6 +192,7 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
   }
   if (faltantes.length > 0) return fallo({ tipo: 'STOCK_INSUFICIENTE', faltantes });
 
+
   return exito({
     lotes: aplicarPlanes(lotes, planes),
     planes,
@@ -164,6 +200,8 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
     unidadesProducidas: receta.porciones * veces,
   });
 }
+
+
 
 export interface DatosCompra {
   readonly id: Id;
@@ -174,6 +212,7 @@ export interface DatosCompra {
   readonly fechaIngreso: FechaISO;
   readonly fechaVencimiento: FechaISO;
 }
+
 
 export function registrarCompra(insumo: Insumo, compra: DatosCompra): Lote {
   asegurarPositivo(compra.presentaciones, 'Presentaciones compradas');
@@ -194,12 +233,15 @@ export function registrarCompra(insumo: Insumo, compra: DatosCompra): Lote {
   };
 }
 
+
 export function agregarLote(lotes: readonly Lote[], lote: Lote): Lote[] {
   if (lotes.some((l) => l.id === lote.id)) {
     throw new ErrorDominio('LOTE_INVALIDO', `Ya existe un lote con id ${lote.id}.`);
   }
   return [...lotes, lote];
 }
+
+
 
 export interface ResumenInsumo {
   readonly insumoId: Id;
@@ -252,6 +294,7 @@ export interface ResultadoBaja {
   readonly mermas: readonly MermaVencimiento[];
   readonly valorTotal: number;
 }
+
 
 export function darDeBajaVencidos(lotes: readonly Lote[], hoy: FechaISO): ResultadoBaja {
   const mermas: MermaVencimiento[] = [];

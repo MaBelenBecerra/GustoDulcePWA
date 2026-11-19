@@ -1,0 +1,28 @@
+rules_version = '2';
+
+
+
+
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function duena(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /respaldos/{uid} {
+
+      match /movimientos/{movId} {
+        allow read: if duena(uid);
+        allow create: if duena(uid) && request.resource.data.datos.id == movId;
+        allow update: if duena(uid) && request.resource.data.datos == resource.data.datos;
+        allow delete: if false;
+      }
+
+      match /documentos/{docId} {
+        allow read, write: if duena(uid);
+      }
+    }
+  }
+}

@@ -1,15 +1,34 @@
-# GustoDulce PWA
-Aplicación Web Progresiva Offline-First diseñada para la gestión financiera y operativa de micro-reposterías artesanales, construida con React, TypeScript y Tailwind CSS v4.
+# GustoDulce
 
-## Arquitectura y Lógica de Dominio
-* **Motor de Costeo ABC (TDABC):** Algoritmo determinista que calcula el costo unitario a partir de Materia Prima Directa (con factor de merma), Mano de Obra Directa (minutaria) y prorrateo de Costos Indirectos de Fabricación (CIF).
-* **Control Logístico FEFO Multilote:** Módulo de inventarios con deducción automática en cascada bajo el principio First-Expired, First-Out, y alertas cromáticas de proximidad de vencimiento (Semáforo de caducidad).
-* **Base de Datos Offline-First:** Persistencia atómica local sin latencia mediante IndexedDB (Dexie.js), con estructura preparada para sincronización asíncrona hacia Firebase Cloud Firestore.
+PWA offline-first de costeo ABC (TDABC) e inventario FEFO para micro-reposteras artesanales.
 
-## Patrón de Interfaz "Sucia-Friendly"
-Diseño ergonómico Mobile-First adaptado al entorno de cocina. Emplea controles táctiles de gran escala (≥ 48x48 dp), alto contraste visual y selectores numéricos incrementales (+/-) para evitar el uso del teclado alfanumérico denso mientras las manos operan ingredientes.
+## Comandos
 
-## Comandos de Desarrollo
-- `npm run dev`: Inicia el servidor de desarrollo.
-- `npm test`: Ejecuta la suite de pruebas unitarias del dominio en Vitest.
-- `npm run build`: Compila la aplicación con validación estricta de TypeScript.
+```bash
+npm install
+npm run dev        # desarrollo
+npm test           # 83 pruebas (71 unitarias + 12 de integración sobre IndexedDB)
+npm run coverage   # cobertura con V8
+npm run typecheck  # TypeScript estricto
+npm run build      # compilación de producción (con Service Worker y manifiesto)
+```
+
+## Arquitectura
+
+- `src/domain/`: dominio puro (costeo, FEFO, libro de movimientos, catálogo LWW). Sin React, Dexie ni Firebase.
+- `src/aplicacion/`: casos de uso, motor de respaldo idempotente y raíz de composición.
+- `src/infra/`: IndexedDB (Dexie) y adaptador de Cloud Firestore.
+- `src/App.tsx`: interfaz Sucia-Friendly.
+- `public/sw.js`, `public/manifest.webmanifest`: PWA instalable y arranque sin conexión.
+- `firestore.rules`: reglas de seguridad del respaldo.
+
+## Respaldo en la nube (opcional)
+
+Sin configuración, la app funciona 100 % en local. Para activar el respaldo, crea `.env.local`:
+
+```
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_APP_ID=...
+```

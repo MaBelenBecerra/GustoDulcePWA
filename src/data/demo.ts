@@ -1,3 +1,12 @@
+
+
+
+
+
+
+
+
+
 import { sumarDias, SUELDO_MINIMO_BS } from '../domain';
 import type { ConfiguracionCostos, FechaISO, Insumo, Lote, Receta } from '../domain';
 
@@ -64,6 +73,7 @@ export const CONFIGURACION_DEMO: ConfiguracionCostos = {
   servicios: { luz: 180, agua: 60, gas: 45 },
 };
 
+
 export function crearLotesDemo(hoy: FechaISO): Lote[] {
   const lote = (
     id: string,
@@ -94,4 +104,17 @@ export function crearLotesDemo(hoy: FechaISO): Lote[] {
     lote('L-cacao-1', 'cacao', 250, 0.1, 15, 120),
     lote('L-polvo-1', 'polvo', 100, 0.06, 60, 180),
   ];
+}
+
+
+
+import type { Semilla } from '../aplicacion/servicio';
+
+export function crearSemilla(hoy: FechaISO): Semilla {
+  return {
+    insumos: INSUMOS_DEMO,
+    recetas: RECETAS_DEMO,
+    configuracion: CONFIGURACION_DEMO,
+    lotes: crearLotesDemo(hoy),
+  };
 }

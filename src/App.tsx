@@ -18,7 +18,7 @@ import {
   ChevronUp,
   Clock,
   Flame,
-  Menu,
+  LogOut,
   Minus,
   Package,
   PackagePlus,
@@ -56,17 +56,18 @@ import type {
 import { crearSemilla } from './data/demo';
 import { motorRespaldo, repositorio, respaldoConfigurado, servicio } from './aplicacion/contenedor';
 import type { Estado } from './aplicacion/servicio';
+import { useSesion } from './PuertaSesion';
 import './App.css';
 
 
 
 type Seccion = 'inventario' | 'recetas' | 'costos' | 'cotizador';
 
-const SECCIONES: readonly { id: Seccion; titulo: string; icono: typeof Package }[] = [
-  { id: 'inventario', titulo: 'Mi Inventario', icono: Package },
-  { id: 'recetas', titulo: 'Mis Recetas', icono: BookOpen },
-  { id: 'costos', titulo: 'Costos Fijos y Horas', icono: Wallet },
-  { id: 'cotizador', titulo: 'Cotizador', icono: Calculator },
+const SECCIONES: readonly { id: Seccion; titulo: string; corto: string; icono: typeof Package }[] = [
+  { id: 'costos', titulo: 'Costos Fijos y Horas', corto: 'Costos', icono: Wallet },
+  { id: 'recetas', titulo: 'Mis Recetas', corto: 'Recetas', icono: BookOpen },
+  { id: 'inventario', titulo: 'Mi Inventario', corto: 'Inventario', icono: Package },
+  { id: 'cotizador', titulo: 'Cotizador', corto: 'Cotización', icono: Calculator },
 ];
 
 const formatoNumero = new Intl.NumberFormat('es-BO', { maximumFractionDigits: 2 });
@@ -329,7 +330,7 @@ function AvisoFlotante({ aviso, onCerrar }: { aviso: Aviso | null; onCerrar: () 
   return (
     <div
       role={exito ? 'status' : 'alert'}
-      className={`fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-lg items-start gap-3 rounded-2xl border-2 p-4 shadow-lg ${
+      className={`fixed inset-x-4 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-lg items-start gap-3 rounded-2xl border-2 p-4 shadow-lg ${
         exito ? 'border-verde-texto bg-verde-fondo text-verde-texto' : 'border-rojo-texto bg-rojo-fondo text-rojo-texto'
       }`}
     >
@@ -758,10 +759,67 @@ function PantallaCotizador({
 
 
 
+function BarraInferior({ actual, onIr }: { actual: Seccion; onIr: (s: Seccion) => void }) {
+  return (
+    <nav
+      aria-label="Secciones"
+      className="fixed inset-x-0 bottom-0 z-30 border-t-2 border-crema-200 bg-crema-100/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+    >
+      <ul className="mx-auto grid max-w-lg grid-cols-4 gap-3 px-1 py-2">
+        {SECCIONES.map(({ id, corto, icono: Icono }) => {
+          const activo = id === actual;
+          return (
+            <li key={id} className="min-w-0">
+              <button
+                type="button"
+                onClick={() => onIr(id)}
+                aria-current={activo ? 'page' : undefined}
+                className={`boton-tactil flex min-h-16 w-full flex-col items-center justify-center gap-1 rounded-2xl border-2 px-0 text-[clamp(0.75rem,3.75vw,0.875rem)] font-bold ${
+                  activo ? 'border-cafe-700 bg-rosa-200 text-cafe-900' : 'border-transparent text-cafe-700'
+                }`}
+              >
+                <Icono size={28} strokeWidth={activo ? 2.5 : 2} aria-hidden />
+                <span className="max-w-full truncate leading-none">{corto}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+function BotonSalir({ onSalir }: { onSalir: () => void }) {
+  const [armado, setArmado] = useState(false);
+  useEffect(() => {
+    if (!armado) return;
+    const t = window.setTimeout(() => setArmado(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [armado]);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (!armado) return setArmado(true);
+        setArmado(false);
+        onSalir();
+      }}
+      aria-label={armado ? 'Toca otra vez para cerrar sesión' : 'Cerrar sesión'}
+      className={`boton-tactil flex h-14 min-w-14 shrink-0 items-center justify-center gap-2 rounded-2xl border-2 px-3 font-bold ${
+        armado ? 'border-rojo-texto bg-rojo-fondo text-rojo-texto' : 'border-crema-200 bg-crema-100 text-cafe-700'
+      }`}
+    >
+      <LogOut size={24} aria-hidden />
+      {armado && <span>¿Salir?</span>}
+    </button>
+  );
+}
+
 export default function App() {
   const hoy = useHoy();
+  const { usuaria, cerrarSesion } = useSesion();
+  const uid = usuaria?.uid ?? null;
   const [seccion, setSeccion] = useState<Seccion>('inventario');
-  const [menuAbierto, setMenuAbierto] = useState(false);
   const [estado, setEstado] = useState<Estado | null>(null);
   const [pendientes, setPendientes] = useState(0);
   const [aviso, setAviso] = useState<Aviso | null>(null);
@@ -776,7 +834,7 @@ export default function App() {
   const refrescar = useCallback(async () => {
     setEstado(await servicio.estado());
     setPendientes(await repositorio.contarPendientes());
-    const motor = await motorRespaldo();
+    const motor = await motorRespaldo(uid);
     if (motor && navigator.onLine) {
       try {
         await motor.sincronizar();
@@ -786,7 +844,7 @@ export default function App() {
 
       }
     }
-  }, []);
+  }, [uid]);
 
 
   useEffect(() => {
@@ -808,16 +866,8 @@ export default function App() {
 
 
 
-  useEffect(() => {
-    if (!menuAbierto) return;
-    const alPresionar = (e: KeyboardEvent) => e.key === 'Escape' && setMenuAbierto(false);
-    window.addEventListener('keydown', alPresionar);
-    return () => window.removeEventListener('keydown', alPresionar);
-  }, [menuAbierto]);
-
   const irA = (s: Seccion) => {
     setSeccion(s);
-    setMenuAbierto(false);
     window.scrollTo({ top: 0 });
   };
 
@@ -919,16 +969,6 @@ export default function App() {
   return (
     <div className="min-h-dvh bg-crema-50 text-cafe-900">
       <header className="sticky top-0 z-20 flex items-center gap-3 border-b-2 border-crema-200 bg-crema-50/95 px-4 py-3 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => setMenuAbierto(true)}
-          aria-label="Abrir menú"
-          aria-expanded={menuAbierto}
-          aria-controls="menu-principal"
-          className="boton-tactil flex size-14 items-center justify-center rounded-2xl border-2 border-rosa-400 bg-rosa-200 text-cafe-900"
-        >
-          <Menu size={30} strokeWidth={2.5} aria-hidden />
-        </button>
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 text-sm font-bold tracking-wide text-cafe-500 uppercase">
             <Cake size={16} aria-hidden /> GustoDulce
@@ -952,47 +992,10 @@ export default function App() {
             <Smartphone size={20} aria-hidden />
           )}
         </span>
+        {usuaria && <BotonSalir onSalir={() => void cerrarSesion()} />}
       </header>
 
-      {menuAbierto && (
-        <div className="fixed inset-0 z-30 flex">
-          <nav id="menu-principal" aria-label="Menú principal" className="flex w-[82%] max-w-sm flex-col gap-3 bg-crema-100 p-4 shadow-xl">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="flex items-center gap-2 text-2xl font-black text-cafe-900">
-                <Cake size={28} aria-hidden /> GustoDulce
-              </span>
-              <button
-                type="button"
-                onClick={() => setMenuAbierto(false)}
-                aria-label="Cerrar menú"
-                className="boton-tactil flex size-14 items-center justify-center rounded-2xl text-cafe-900"
-              >
-                <X size={30} aria-hidden />
-              </button>
-            </div>
-            {SECCIONES.map(({ id, titulo, icono: Icono }) => {
-              const activo = id === seccion;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => irA(id)}
-                  aria-current={activo ? 'page' : undefined}
-                  className={`boton-tactil flex min-h-16 items-center gap-4 rounded-2xl border-2 px-4 text-left text-lg font-bold ${
-                    activo ? 'border-cafe-700 bg-rosa-200 text-cafe-900' : 'border-transparent bg-crema-50 text-cafe-700'
-                  }`}
-                >
-                  <Icono size={28} aria-hidden />
-                  {titulo}
-                </button>
-              );
-            })}
-          </nav>
-          <button type="button" aria-label="Cerrar menú" onClick={() => setMenuAbierto(false)} className="flex-1 bg-cafe-900/40" />
-        </div>
-      )}
-
-      <main className="mx-auto max-w-lg px-4 pt-4 pb-32">
+      <main className="mx-auto max-w-lg px-4 pt-4 pb-[calc(8rem+env(safe-area-inset-bottom))]">
         {seccion === 'inventario' && (
           <PantallaInventario
             insumos={insumos}
@@ -1018,6 +1021,7 @@ export default function App() {
         {seccion === 'cotizador' && <PantallaCotizador recetas={recetas} insumos={insumos} config={config} />}
       </main>
 
+      <BarraInferior actual={seccion} onIr={irA} />
       <AvisoFlotante aviso={aviso} onCerrar={cerrarAviso} />
     </div>
   );

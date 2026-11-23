@@ -9,3 +9,4 @@ export * from './costeo';
 export * from './inventario';
 export * from './movimientos';
 export * from './documentos';
+export * from './sesion';

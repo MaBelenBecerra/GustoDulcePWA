@@ -5,13 +5,15 @@
 
 
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   AlertTriangle,
   BookOpen,
   Cake,
   Calculator,
+  Check,
   CheckCircle2,
   ChevronDown,
   CloudOff,
@@ -22,6 +24,7 @@ import {
   Minus,
   Package,
   PackagePlus,
+  Pencil,
   Plus,
   Smartphone,
   Trash2,
@@ -31,6 +34,7 @@ import {
 import {
   calcularCostoReceta,
   cotizar,
+  decimalesPorPaso,
   diasRestantes,
   fechaLocalISO,
   formatearBs,
@@ -42,6 +46,8 @@ import {
   sumaPrecisa,
   tasaMinutoCIF,
   tasaMinutoMOD,
+  textoParaEditar,
+  validarEntradaNumerica,
 } from './domain';
 import type {
   ConfiguracionCostos,
@@ -64,9 +70,9 @@ import './App.css';
 type Seccion = 'inventario' | 'recetas' | 'costos' | 'cotizador';
 
 const SECCIONES: readonly { id: Seccion; titulo: string; corto: string; icono: typeof Package }[] = [
+  { id: 'inventario', titulo: 'Mi Inventario', corto: 'Inventario', icono: Package },
   { id: 'costos', titulo: 'Costos Fijos y Horas', corto: 'Costos', icono: Wallet },
   { id: 'recetas', titulo: 'Mis Recetas', corto: 'Recetas', icono: BookOpen },
-  { id: 'inventario', titulo: 'Mi Inventario', corto: 'Inventario', icono: Package },
   { id: 'cotizador', titulo: 'Cotizador', corto: 'Cotización', icono: Calculator },
 ];
 
@@ -122,6 +128,10 @@ interface PropsSelector {
   paso: number;
   formato?: (valor: number) => string;
   ayuda?: string;
+  
+  unidad?: string;
+  
+  decimales?: number;
 }
 
 
@@ -130,7 +140,7 @@ interface PropsSelector {
 
 
 
-function SelectorNumerico({ etiqueta, valor, onCambio, min, max, paso, formato, ayuda }: PropsSelector) {
+function SelectorNumerico({ etiqueta, valor, onCambio, min, max, paso, formato, ayuda, unidad, decimales }: PropsSelector) {
   const valorRef = useRef(valor);
   const temporizador = useRef<number | null>(null);
   const repeticiones = useRef(0);
@@ -187,6 +197,109 @@ function SelectorNumerico({ etiqueta, valor, onCambio, min, max, paso, formato, 
 
   const texto = formato ? formato(valor) : formatoNumero.format(valor);
 
+  
+  const dec = decimales ?? decimalesPorPaso(paso);
+  const idCampo = useId();
+  const campo = useRef<HTMLInputElement>(null);
+  const [editando, setEditando] = useState(false);
+  const [borrador, setBorrador] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const abrirEdicion = () => {
+    detener();
+    
+    
+    flushSync(() => {
+      setBorrador(textoParaEditar(valor, dec));
+      setError(null);
+      setEditando(true);
+    });
+    campo.current?.focus();
+    campo.current?.select();
+  };
+
+  const confirmar = () => {
+    const r = validarEntradaNumerica(borrador, { min, max, decimales: dec });
+    if (!r.ok) {
+      setError(r.mensaje);
+      return;
+    }
+    valorRef.current = r.valor;
+    if (r.valor !== valor) onCambio(r.valor);
+    setEditando(false);
+    setError(null);
+  };
+
+  const cancelar = () => {
+    setEditando(false);
+    setError(null);
+  };
+
+  
+  const sinPerderFoco = (e: ReactPointerEvent<HTMLButtonElement>) => e.preventDefault();
+
+  if (editando) {
+    return (
+      <div role="group" aria-label={etiqueta} className="flex flex-col gap-2">
+        <label htmlFor={idCampo} className="text-base font-semibold text-cafe-700">
+          {etiqueta}
+        </label>
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onPointerDown={sinPerderFoco}
+            onClick={cancelar}
+            aria-label={`Cancelar y dejar ${texto}`}
+            className="boton-tactil flex size-16 shrink-0 items-center justify-center rounded-full border-2 border-rosa-400 bg-rosa-100 text-cafe-900 select-none"
+          >
+            <X size={30} strokeWidth={3} aria-hidden />
+          </button>
+          <input
+            ref={campo}
+            id={idCampo}
+            type="text"
+            inputMode={dec > 0 ? 'decimal' : 'numeric'}
+            enterKeyHint="done"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={borrador}
+            onChange={(e) => {
+              setBorrador(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmar();
+              } else if (e.key === 'Escape') {
+                cancelar();
+              }
+            }}
+            onBlur={confirmar}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={`${idCampo}-ayuda`}
+            className={`h-16 min-w-0 flex-1 appearance-none rounded-2xl border-2 bg-crema-50 px-2 text-center text-3xl font-extrabold text-cafe-900 tabular-nums focus:outline-none ${
+              error ? 'border-rojo-texto' : 'border-cafe-700'
+            }`}
+          />
+          <button
+            type="button"
+            onPointerDown={sinPerderFoco}
+            onClick={confirmar}
+            aria-label="Guardar cantidad"
+            className="boton-tactil flex size-16 shrink-0 items-center justify-center rounded-full border-2 border-rosa-400 bg-rosa-300 text-cafe-900 select-none"
+          >
+            <Check size={30} strokeWidth={3} aria-hidden />
+          </button>
+        </div>
+        <span id={`${idCampo}-ayuda`} role={error ? 'alert' : undefined} className={`text-sm ${error ? 'font-semibold text-rojo-texto' : 'text-cafe-500'}`}>
+          {error ?? `Escribe la cantidad${unidad ? ` en ${unidad}` : ''} y toca ✓`}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div role="group" aria-label={etiqueta} className="flex flex-col gap-2">
       <span className="text-base font-semibold text-cafe-700">{etiqueta}</span>
@@ -199,9 +312,24 @@ function SelectorNumerico({ etiqueta, valor, onCambio, min, max, paso, formato, 
         >
           <Minus size={30} strokeWidth={3} aria-hidden />
         </button>
-        <output aria-live="polite" className="min-w-0 flex-1 text-center text-3xl font-extrabold text-cafe-900 tabular-nums">
-          {texto}
-        </output>
+        <button
+          type="button"
+          onClick={abrirEdicion}
+          aria-label={`${etiqueta}: ${texto}. Toca para escribir la cantidad`}
+          className="boton-tactil flex min-h-16 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-dashed border-crema-200 px-1 py-1 text-cafe-900"
+        >
+          <output
+            aria-live="polite"
+            className={`max-w-full text-center leading-tight font-extrabold break-words tabular-nums ${
+              texto.length <= 4 ? 'text-3xl' : texto.length <= 7 ? 'text-2xl' : texto.length <= 8 ? 'text-xl' : 'text-[clamp(1rem,5vw,1.25rem)]'
+            }`}
+          >
+            {texto}
+          </output>
+          <span className="flex items-center gap-1 text-xs font-semibold text-cafe-500">
+            <Pencil size={12} aria-hidden /> Escribir
+          </span>
+        </button>
         <button
           {...propsBoton(1)}
           aria-label={`Aumentar ${etiqueta}`}
@@ -476,6 +604,7 @@ function FormularioCompra({
         min={1}
         max={99}
         paso={1}
+        unidad="presentaciones"
       />
       <SelectorNumerico
         etiqueta="Precio pagado por presentación"
@@ -485,6 +614,7 @@ function FormularioCompra({
         max={5000}
         paso={0.5}
         formato={formatearBs}
+        unidad="Bs"
         ayuda={`Total de la compra: ${formatearBs(precio * presentaciones)}`}
       />
       <SelectorNumerico
@@ -495,6 +625,7 @@ function FormularioCompra({
         max={730}
         paso={1}
         formato={(v) => `${v} días`}
+        unidad="días"
       />
       <BotonPrincipal onClick={() => onGuardar(presentaciones, precio, dias)} icono={<CheckCircle2 size={24} aria-hidden />}>
         Guardar compra
@@ -547,6 +678,7 @@ function PantallaRecetas({ recetas, insumos, lotes, config, hoy, onActualizar, o
             max={600}
             paso={5}
             formato={(v) => `${v} min`}
+            unidad="minutos"
           />
           <SelectorNumerico
             etiqueta="Minutos de horneado"
@@ -556,6 +688,7 @@ function PantallaRecetas({ recetas, insumos, lotes, config, hoy, onActualizar, o
             max={600}
             paso={5}
             formato={(v) => `${v} min`}
+            unidad="minutos"
           />
           <SelectorNumerico
             etiqueta="Porciones que rinde"
@@ -564,6 +697,7 @@ function PantallaRecetas({ recetas, insumos, lotes, config, hoy, onActualizar, o
             min={1}
             max={200}
             paso={1}
+            unidad="porciones"
           />
         </div>
       </Tarjeta>
@@ -595,6 +729,8 @@ function PantallaRecetas({ recetas, insumos, lotes, config, hoy, onActualizar, o
                   max={insumo.unidad === 'u' ? 60 : 10000}
                   paso={pasoPorUnidad(insumo.unidad)}
                   formato={(v) => formatearCantidad(v, insumo.unidad)}
+                  unidad={insumo.unidad === 'u' ? 'unidades' : insumo.unidad}
+                  decimales={insumo.unidad === 'u' ? 0 : 1}
                 />
               </div>
             );
@@ -622,6 +758,7 @@ function PantallaRecetas({ recetas, insumos, lotes, config, hoy, onActualizar, o
             min={1}
             max={20}
             paso={1}
+            unidad="veces"
             ayuda={`Saldrán ${receta.porciones * veces} porciones`}
           />
           <BotonPrincipal onClick={() => onProducir(receta.id, veces)} icono={<Flame size={24} aria-hidden />}>
@@ -664,6 +801,7 @@ function PantallaCostos({
           max={Math.min(300, HORAS_MES_MAXIMO)}
           paso={1}
           formato={(v) => `${v} h`}
+          unidad="horas"
           ayuda={`Aproximadamente ${formatoNumero.format(horasSemana)} horas por semana`}
         />
         <div className="mt-5 flex items-center gap-3 rounded-2xl bg-rosa-100 p-4">
@@ -677,9 +815,9 @@ function PantallaCostos({
       <Tarjeta>
         <TituloSeccion>Servicios del mes</TituloSeccion>
         <div className="flex flex-col gap-6">
-          <SelectorNumerico etiqueta="Luz" valor={config.servicios.luz} onCambio={servicio('luz')} min={0} max={3000} paso={5} formato={formatearBs} />
-          <SelectorNumerico etiqueta="Agua" valor={config.servicios.agua} onCambio={servicio('agua')} min={0} max={3000} paso={5} formato={formatearBs} />
-          <SelectorNumerico etiqueta="Gas (garrafas o red)" valor={config.servicios.gas} onCambio={servicio('gas')} min={0} max={3000} paso={5} formato={formatearBs} />
+          <SelectorNumerico etiqueta="Luz" valor={config.servicios.luz} onCambio={servicio('luz')} min={0} max={3000} paso={5} formato={formatearBs} unidad="Bs" decimales={2} />
+          <SelectorNumerico etiqueta="Agua" valor={config.servicios.agua} onCambio={servicio('agua')} min={0} max={3000} paso={5} formato={formatearBs} unidad="Bs" decimales={2} />
+          <SelectorNumerico etiqueta="Gas (garrafas o red)" valor={config.servicios.gas} onCambio={servicio('gas')} min={0} max={3000} paso={5} formato={formatearBs} unidad="Bs" decimales={2} />
         </div>
         <div className="mt-5 flex items-center gap-3 rounded-2xl bg-rosa-100 p-4">
           <Flame size={30} className="shrink-0 text-cafe-700" aria-hidden />
@@ -731,7 +869,7 @@ function PantallaCotizador({
 
       <Tarjeta>
         <div className="flex flex-col gap-6">
-          <SelectorNumerico etiqueta="Porciones" valor={porciones} onCambio={setPorciones} min={1} max={500} paso={1} />
+          <SelectorNumerico etiqueta="Porciones" valor={porciones} onCambio={setPorciones} min={1} max={500} paso={1} unidad="porciones" />
           <SelectorNumerico
             etiqueta="Mi ganancia sobre el precio"
             valor={margen}
@@ -740,6 +878,7 @@ function PantallaCotizador({
             max={90}
             paso={5}
             formato={(v) => `${v} %`}
+            unidad="%"
           />
         </div>
       </Tarjeta>

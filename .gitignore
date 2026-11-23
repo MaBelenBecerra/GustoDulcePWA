@@ -1,9 +1,7 @@
-# Dependencias y compilados
 node_modules
 dist
 coverage
 *.tsbuildinfo
 
-# Variables de entorno locales (claves de Firebase)
 .env.local
 *.local

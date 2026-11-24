@@ -1,27 +1,6 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import { sumaPrecisa, TOLERANCIA } from './numeros';
 import { exito, fallo } from './tipos';
 import type { Id, Lote, Resultado } from './tipos';
-
-
 
 interface Comun {
   
@@ -64,12 +43,9 @@ const comun = (ctx: Contexto) => ({
   lamport: ctx.lamport,
 });
 
-
-
 export function movimientoCompra(ctx: Contexto, lote: Lote): Movimiento {
   return { ...comun(ctx), tipo: 'COMPRA', lote };
 }
-
 
 export function movimientosProduccion(
   ctx: Contexto,
@@ -98,8 +74,6 @@ export function movimientosBaja(
 ): Movimiento[] {
   return mermas.map((m): Movimiento => ({ ...comun(ctx), tipo: 'BAJA_VENCIMIENTO', ...m }));
 }
-
-
 
 export interface ResultadoFusion {
   readonly movimientos: Movimiento[];
@@ -135,7 +109,6 @@ export function ordenarMovimientos(movs: readonly Movimiento[]): Movimiento[] {
 }
 
 
-
 export interface Sobregiro {
   readonly loteId: Id;
   readonly insumoId: Id;
@@ -152,11 +125,6 @@ export interface Proyeccion {
   
   readonly valorMerma: number;
 }
-
-
-
-
-
 
 export function proyectarInventario(movimientos: readonly Movimiento[]): Proyeccion {
   const base = new Map<Id, Lote>();

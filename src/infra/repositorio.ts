@@ -1,17 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import Dexie from 'dexie';
 import type { EntityTable } from 'dexie';
 import { fusionar, fusionarDocumentos } from '../domain';
@@ -107,11 +93,6 @@ export class RepositorioLocal {
     return { movimientos: movs.map((f) => f.datos), documentos: docs.map((f) => f.datos) };
   }
 
-  
-
-
-
-
   async ejecutarAtomico<T>(decidir: (vista: Vista) => Efectos<T>): Promise<T> {
     const dispositivoId = await this.dispositivoId();
     const { movimientos, documentos, meta } = this.db;
@@ -175,10 +156,6 @@ export class RepositorioLocal {
       }
     });
   }
-
-  
-
-
 
   async aplicarRemotos(
     remotosMovs: readonly Movimiento[],

@@ -1,15 +1,6 @@
-
-
-
-
-
-
-
 import { ErrorDominio } from './tipos';
 
-
 export const TOLERANCIA = 1e-9;
-
 
 export function asegurarFinito(valor: number, campo: string): number {
   if (typeof valor !== 'number' || !Number.isFinite(valor)) {
@@ -17,7 +8,6 @@ export function asegurarFinito(valor: number, campo: string): number {
   }
   return valor;
 }
-
 
 export function asegurarNoNegativo(valor: number, campo: string): number {
   asegurarFinito(valor, campo);
@@ -36,10 +26,6 @@ export function asegurarPositivo(valor: number, campo: string): number {
   return valor;
 }
 
-
-
-
-
 export function redondear(valor: number, decimales = 2): number {
   asegurarFinito(valor, 'valor a redondear');
   if (!Number.isInteger(decimales) || decimales < 0 || decimales > 10) {
@@ -50,10 +36,6 @@ export function redondear(valor: number, decimales = 2): number {
   const resultado = (signo * Math.round(Math.abs(valor) * factor * (1 + Number.EPSILON))) / factor;
   return resultado === 0 ? 0 : resultado;
 }
-
-
-
-
 
 export function redondearAlAlza(valor: number, paso = 0.5): number {
   asegurarNoNegativo(valor, 'valor');
@@ -78,10 +60,6 @@ export function limitar(valor: number, min: number, max: number): number {
   if (min > max) throw new ErrorDominio('NUMERO_INVALIDO', 'min no puede superar a max.');
   return Math.min(max, Math.max(min, valor));
 }
-
-
-
-
 
 export function sumaPrecisa(valores: readonly number[]): number {
   let suma = 0;

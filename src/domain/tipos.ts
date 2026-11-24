@@ -119,13 +119,8 @@ export class ErrorDominio extends Error {
   }
 }
 
-
-
-
 export const SUELDO_MINIMO_BS = 3300;
 
-
 export const HORAS_MES_MAXIMO = 744;
-
 
 export const UMBRAL_AMARILLO_DIAS = 7;

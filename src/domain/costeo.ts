@@ -1,17 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import { ErrorDominio, HORAS_MES_MAXIMO } from './tipos';
 import type { ConfiguracionCostos, Id, Insumo, Receta } from './tipos';
 import {
@@ -105,8 +91,6 @@ export function calcularMPD(receta: Receta, insumos: ReadonlyMap<Id, Insumo>): D
 }
 
 
-
-
 export function tasaMinutoMOD(config: ConfiguracionCostos): number {
   validarConfiguracion(config);
   return config.sueldoMensual / (60 * config.horasTrabajoMes);
@@ -122,9 +106,6 @@ export function calcularMOD(receta: Receta, config: ConfiguracionCostos): number
   return tasaMinutoMOD(config) * minutosReceta(receta);
 }
 
-
-
-
 export function tasaMinutoCIF(config: ConfiguracionCostos): number {
   validarConfiguracion(config);
   const { luz, agua, gas } = config.servicios;
@@ -135,8 +116,6 @@ export function calcularCIF(receta: Receta, config: ConfiguracionCostos): number
   validarReceta(receta);
   return tasaMinutoCIF(config) * minutosReceta(receta);
 }
-
-
 
 export interface CostoReceta {
   readonly mpd: number;
@@ -168,8 +147,6 @@ export function calcularCostoReceta(
     lineasMPD: detalle.lineas,
   };
 }
-
-
 
 
 export function precioSugerido(costoUnitario: number, margen: number): number {

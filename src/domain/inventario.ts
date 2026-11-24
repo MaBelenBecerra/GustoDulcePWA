@@ -1,26 +1,8 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import { cantidadBruta } from './costeo';
 import { compararFechas, diasRestantes, semaforo, SEVERIDAD_SEMAFORO } from './fechas';
 import { asegurarNoNegativo, asegurarPositivo, sumaPrecisa, TOLERANCIA } from './numeros';
 import { ErrorDominio, exito, fallo } from './tipos';
 import type { FechaISO, Id, Insumo, Lote, Receta, Resultado, Semaforo } from './tipos';
-
-
-
 
 export interface EstrategiaConsumo {
   readonly nombre: string;
@@ -29,10 +11,6 @@ export interface EstrategiaConsumo {
 }
 
 const compararTexto = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-
-
-
 
 export const estrategiaFEFO: EstrategiaConsumo = {
   nombre: 'FEFO',
@@ -52,7 +30,6 @@ export const estrategiaFEFO: EstrategiaConsumo = {
       );
   },
 };
-
 
 
 export interface Asignacion {
@@ -129,8 +106,6 @@ export function aplicarPlanes(lotes: readonly Lote[], planes: readonly PlanConsu
   });
 }
 
-
-
 export type ErrorProduccion =
   | { readonly tipo: 'STOCK_INSUFICIENTE'; readonly faltantes: readonly Faltante[] }
   | { readonly tipo: 'INSUMO_DESCONOCIDO'; readonly insumoId: Id };
@@ -152,11 +127,6 @@ export interface SolicitudProduccion {
   readonly hoy: FechaISO;
   readonly estrategia?: EstrategiaConsumo;
 }
-
-
-
-
-
 
 export function consumoBrutoReceta(
   receta: Receta,
@@ -201,8 +171,6 @@ export function producir(solicitud: SolicitudProduccion): Resultado<ResultadoPro
   });
 }
 
-
-
 export interface DatosCompra {
   readonly id: Id;
 
@@ -212,7 +180,6 @@ export interface DatosCompra {
   readonly fechaIngreso: FechaISO;
   readonly fechaVencimiento: FechaISO;
 }
-
 
 export function registrarCompra(insumo: Insumo, compra: DatosCompra): Lote {
   asegurarPositivo(compra.presentaciones, 'Presentaciones compradas');
@@ -233,15 +200,12 @@ export function registrarCompra(insumo: Insumo, compra: DatosCompra): Lote {
   };
 }
 
-
 export function agregarLote(lotes: readonly Lote[], lote: Lote): Lote[] {
   if (lotes.some((l) => l.id === lote.id)) {
     throw new ErrorDominio('LOTE_INVALIDO', `Ya existe un lote con id ${lote.id}.`);
   }
   return [...lotes, lote];
 }
-
-
 
 export interface ResumenInsumo {
   readonly insumoId: Id;

@@ -1,22 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import type { FirebaseApp } from 'firebase/app';
 import {
   collection,

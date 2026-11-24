@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 import { ErrorDominio, UMBRAL_AMARILLO_DIAS } from './tipos';
 import type { FechaISO, Semaforo } from './tipos';
 
@@ -78,12 +70,6 @@ export function semaforoPorDias(dias: number): Semaforo {
   return 'verde';
 }
 
-
-
-
-
-
-
 export function semaforo(vencimiento: FechaISO, hoy: FechaISO): Semaforo {
   return semaforoPorDias(diasRestantes(vencimiento, hoy));
 }
@@ -94,12 +80,6 @@ export const SEVERIDAD_SEMAFORO: Readonly<Record<Semaforo, number>> = {
   amarillo: 1,
   rojo: 2,
 };
-
-
-
-
-
-
 
 export function fechaLocalISO(fecha: Date): FechaISO {
   const a = fecha.getFullYear();

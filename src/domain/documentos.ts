@@ -1,16 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
 import type { Id } from './tipos';
 
 export type Coleccion = 'insumos' | 'recetas' | 'configuracion';

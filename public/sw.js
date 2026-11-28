@@ -9,7 +9,7 @@
 
 
 
-const VERSION = 'gustodulce-v1';
+const VERSION = 'gustodulce-v2';
 const PRECARGA = ['/', '/manifest.webmanifest', '/iconos/icono-192.png', '/iconos/icono-512.png'];
 
 self.addEventListener('install', (evento) => {

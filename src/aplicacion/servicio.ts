@@ -10,8 +10,12 @@
 
 
 import {
+  agregarLote,
   darDeBajaVencidos,
   ErrorDominio,
+  SUELDO_MINIMO_BS,
+  validarInsumo,
+  validarNombre,
   movimientoCompra,
   movimientosBaja,
   movimientosProduccion,
@@ -25,6 +29,7 @@ import {
 import type {
   Coleccion,
   ConfiguracionCostos,
+  CotizacionGuardada,
   Contexto,
   Documento,
   ErrorProduccion,
@@ -36,11 +41,18 @@ import type {
   Proyeccion,
   Receta,
   Resultado,
+  UnidadBase,
 } from '../domain';
 import type { RepositorioLocal, Vista } from '../infra/repositorio';
 
 
 export const CONFIGURACION_ID = 'principal';
+
+export const CONFIGURACION_INICIAL: ConfiguracionCostos = {
+  sueldoMensual: SUELDO_MINIMO_BS,
+  horasTrabajoMes: 120,
+  servicios: { luz: 0, agua: 0, gas: 0 },
+};
 
 
 
@@ -54,14 +66,16 @@ function coleccion<T>(docs: readonly Documento[], nombre: Coleccion): T[] {
 export interface Catalogo {
   readonly insumos: Insumo[];
   readonly recetas: Receta[];
+  readonly cotizaciones: CotizacionGuardada[];
   readonly config: ConfiguracionCostos | null;
 }
 
 export function leerCatalogo(docs: readonly Documento[]): Catalogo {
   const config = docs.find((d) => d.coleccion === 'configuracion' && d.id === CONFIGURACION_ID);
   return {
-    insumos: coleccion<Insumo>(docs, 'insumos'),
+    insumos: coleccion<Insumo>(docs, 'insumos').sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     recetas: coleccion<Receta>(docs, 'recetas'),
+    cotizaciones: coleccion<CotizacionGuardada>(docs, 'cotizaciones'),
     config: config ? (config.datos as ConfiguracionCostos) : null,
   };
 }
@@ -69,7 +83,9 @@ export function leerCatalogo(docs: readonly Documento[]): Catalogo {
 export interface Estado {
   readonly insumos: Insumo[];
   readonly recetas: Receta[];
+  readonly cotizaciones: CotizacionGuardada[];
   readonly config: ConfiguracionCostos;
+  readonly configGuardada: boolean;
   readonly lotes: Lote[];
   readonly proyeccion: Proyeccion;
   readonly movimientos: readonly Movimiento[];
@@ -85,6 +101,37 @@ export interface Semilla {
   readonly recetas: readonly Receta[];
   readonly configuracion: ConfiguracionCostos;
   readonly lotes: readonly Lote[];
+  readonly cotizaciones: readonly CotizacionGuardada[];
+  readonly producciones: readonly { readonly recetaId: Id; readonly veces: number }[];
+}
+
+export interface ResumenCarga {
+  readonly insumos: number;
+  readonly recetas: number;
+  readonly lotes: number;
+  readonly cotizaciones: number;
+  readonly producciones: number;
+  readonly consumos: number;
+  readonly total: number;
+}
+
+export interface DatosInsumoNuevo {
+  readonly nombre: string;
+  readonly unidad: UnidadBase;
+  readonly presentacionCantidad: number;
+  readonly precioPresentacion: number;
+  readonly merma: number;
+  readonly presentaciones: number;
+  readonly diasVence: number;
+  readonly hoy: FechaISO;
+}
+
+export interface DatosRecetaNueva {
+  readonly nombre: string;
+  readonly porciones: number;
+  readonly minutosElaboracion: number;
+  readonly minutosHorneado: number;
+  readonly ingredientes: readonly { readonly insumoId: Id; readonly cantidad: number }[];
 }
 
 export interface Reloj {
@@ -129,13 +176,20 @@ export class ServicioGustoDulce {
   async estado(): Promise<Estado> {
     const { movimientos, documentos } = await this.repo.leerTodo();
     const catalogo = leerCatalogo(documentos);
-    if (!catalogo.config) throw new ErrorDominio('CONFIGURACION_INVALIDA', 'No hay configuración de costos.');
     const proyeccion = proyectarInventario(movimientos);
-    return { ...catalogo, config: catalogo.config, lotes: proyeccion.lotes, proyeccion, movimientos };
+    return {
+      ...catalogo,
+      config: catalogo.config ?? CONFIGURACION_INICIAL,
+      configGuardada: catalogo.config !== null,
+      lotes: proyeccion.lotes,
+      proyeccion,
+      movimientos,
+    };
   }
 
   async estaVacio(): Promise<boolean> {
-    return (await this.repo.db.documentos.count()) === 0;
+    const [docs, movs] = await Promise.all([this.repo.db.documentos.count(), this.repo.db.movimientos.count()]);
+    return docs === 0 && movs === 0;
   }
 
   
@@ -202,6 +256,83 @@ export class ServicioGustoDulce {
 
   
 
+  crearInsumo(datos: DatosInsumoNuevo): Promise<Insumo> {
+    return this.repo.ejecutarAtomico((vista) => {
+      const nombre = validarNombre(datos.nombre, 'del insumo');
+      const catalogo = leerCatalogo(vista.documentos);
+      if (catalogo.insumos.some((i) => i.nombre.toLowerCase() === nombre.toLowerCase())) {
+        throw new ErrorDominio('NOMBRE_INVALIDO', `Ya tienes un insumo llamado "${nombre}".`);
+      }
+      const insumo: Insumo = {
+        id: `i-${this.nuevoId()}`,
+        nombre,
+        unidad: datos.unidad,
+        presentacion: { cantidad: datos.presentacionCantidad, precio: datos.precioPresentacion },
+        merma: datos.merma,
+      };
+      validarInsumo(insumo);
+      const movimientos: Movimiento[] = [];
+      if (datos.presentaciones > 0) {
+        const lote = registrarCompraDominio(insumo, {
+          id: `L-${this.nuevoId()}`,
+          presentaciones: datos.presentaciones,
+          precioPagado: datos.precioPresentacion * datos.presentaciones,
+          fechaIngreso: datos.hoy,
+          fechaVencimiento: sumarDias(datos.hoy, datos.diasVence),
+        });
+        movimientos.push(movimientoCompra(this.contexto(vista), lote));
+      }
+      return { documentos: [this.documento(vista, 'insumos', insumo.id, insumo)], movimientos, resultado: insumo };
+    });
+  }
+
+  crearReceta(datos: DatosRecetaNueva): Promise<Receta> {
+    return this.repo.ejecutarAtomico((vista) => {
+      const nombre = validarNombre(datos.nombre, 'de la receta');
+      const catalogo = leerCatalogo(vista.documentos);
+      if (catalogo.recetas.some((r) => !r.archivada && r.nombre.toLowerCase() === nombre.toLowerCase())) {
+        throw new ErrorDominio('NOMBRE_INVALIDO', `Ya tienes una receta llamada "${nombre}".`);
+      }
+      const ids = new Set(catalogo.insumos.map((i) => i.id));
+      const ingredientes = datos.ingredientes.filter((i) => i.cantidad > 0);
+      if (ingredientes.length === 0) {
+        throw new ErrorDominio('RECETA_INVALIDA', 'Agrega al menos un ingrediente con cantidad.');
+      }
+      if (new Set(ingredientes.map((i) => i.insumoId)).size !== ingredientes.length) {
+        throw new ErrorDominio('RECETA_INVALIDA', 'Hay un ingrediente repetido en la receta.');
+      }
+      for (const ing of ingredientes) {
+        if (!ids.has(ing.insumoId)) throw new ErrorDominio('INSUMO_DESCONOCIDO', 'La receta usa un insumo que no existe.');
+      }
+      const receta: Receta = {
+        id: `r-${this.nuevoId()}`,
+        nombre,
+        porciones: datos.porciones,
+        minutosElaboracion: datos.minutosElaboracion,
+        minutosHorneado: datos.minutosHorneado,
+        ingredientes,
+      };
+      validarReceta(receta);
+      return { documentos: [this.documento(vista, 'recetas', receta.id, receta)], resultado: receta };
+    });
+  }
+
+  archivarReceta(recetaId: Id): Promise<void> {
+    return this.repo.ejecutarAtomico((vista) => {
+      const receta = leerCatalogo(vista.documentos).recetas.find((r) => r.id === recetaId);
+      if (!receta) throw new ErrorDominio('RECETA_INVALIDA', 'La receta ya no existe.');
+      const archivada: Receta = { ...receta, archivada: true };
+      return { documentos: [this.documento(vista, 'recetas', receta.id, archivada)], resultado: undefined };
+    });
+  }
+
+  registrarCotizacion(datos: Omit<CotizacionGuardada, 'id'>): Promise<CotizacionGuardada> {
+    return this.repo.ejecutarAtomico((vista) => {
+      const cotizacion: CotizacionGuardada = { ...datos, cliente: datos.cliente.trim().slice(0, 60), id: `q-${this.nuevoId()}` };
+      return { documentos: [this.documento(vista, 'cotizaciones', cotizacion.id, cotizacion)], resultado: cotizacion };
+    });
+  }
+
   guardarReceta(receta: Receta): Promise<void> {
     return this.repo.ejecutarAtomico((vista) => {
       validarReceta(receta);
@@ -218,20 +349,77 @@ export class ServicioGustoDulce {
 
   
 
-  
-  sembrar(semilla: Semilla): Promise<void> {
-    return this.repo.ejecutarAtomico((vista) => {
-      if (vista.documentos.length > 0) return { resultado: undefined };
+  cargarDatosPrueba(semilla: Semilla, hoy: FechaISO): Promise<ResumenCarga> {
+    return this.repo.ejecutarAtomico<ResumenCarga>((vista) => {
+      const existentes = new Set(vista.documentos.map((d) => `${d.coleccion}/${d.id}`));
+      const lotesExistentes = new Set(proyectarInventario(vista.movimientos).lotes.map((l) => l.id));
+      const lotesNuevos = semilla.lotes.filter((l) => !lotesExistentes.has(l.id));
+      if (lotesNuevos.length === 0) {
+        throw new ErrorDominio('MOVIMIENTO_INVALIDO', 'Los datos de prueba ya están cargados en esta cuenta.');
+      }
+      const ctx = this.contexto(vista);
+      const catalogo = leerCatalogo(vista.documentos);
+      const clave = (n: string) => n.trim().toLowerCase();
+
+      const porNombre = new Map(catalogo.insumos.map((i) => [clave(i.nombre), i.id]));
+      const equivalente = new Map<Id, Id>();
+      for (const i of semilla.insumos) {
+        const suyo = porNombre.get(clave(i.nombre));
+        if (suyo && suyo !== i.id) equivalente.set(i.id, suyo);
+      }
+      const idReal = (id: Id) => equivalente.get(id) ?? id;
+
+      const insumos = semilla.insumos.filter((i) => !equivalente.has(i.id) && !existentes.has(`insumos/${i.id}`));
+      const nombresRecetas = new Set(catalogo.recetas.filter((r) => !r.archivada).map((r) => clave(r.nombre)));
+      const recetas = semilla.recetas
+        .filter((r) => !existentes.has(`recetas/${r.id}`) && !nombresRecetas.has(clave(r.nombre)))
+        .map((r) => ({ ...r, ingredientes: r.ingredientes.map((ing) => ({ ...ing, insumoId: idReal(ing.insumoId) })) }));
+      const cotizaciones = semilla.cotizaciones.filter((c) => !existentes.has(`cotizaciones/${c.id}`));
+      insumos.forEach(validarInsumo);
+      recetas.forEach(validarReceta);
       const documentos: Documento[] = [
-        ...semilla.insumos.map((i) => this.documento(vista, 'insumos', i.id, i)),
-        ...semilla.recetas.map((r) => this.documento(vista, 'recetas', r.id, r)),
-        this.documento(vista, 'configuracion', CONFIGURACION_ID, semilla.configuracion),
+        ...insumos.map((i) => this.documento(vista, 'insumos', i.id, i)),
+        ...recetas.map((r) => this.documento(vista, 'recetas', r.id, r)),
+        ...cotizaciones.map((c) => this.documento(vista, 'cotizaciones', c.id, c)),
       ];
-      
-      const movimientos = semilla.lotes.map((lote) =>
-        movimientoCompra({ ...this.contexto(vista), nuevoId: () => `C-${lote.id}` }, lote),
+      if (!existentes.has(`configuracion/${CONFIGURACION_ID}`)) {
+        validarConfiguracion(semilla.configuracion);
+        documentos.push(this.documento(vista, 'configuracion', CONFIGURACION_ID, semilla.configuracion));
+      }
+
+      const lotesAjustados = lotesNuevos.map((l) => ({ ...l, insumoId: idReal(l.insumoId) }));
+      const movimientos: Movimiento[] = lotesAjustados.map((lote) =>
+        movimientoCompra({ ...ctx, nuevoId: () => `C-${lote.id}` }, lote),
       );
-      return { documentos, movimientos, resultado: undefined };
+
+      const mapaInsumos = new Map([...catalogo.insumos, ...insumos].map((i) => [i.id, i]));
+      const mapaRecetas = new Map([...catalogo.recetas, ...recetas].map((r) => [r.id, r]));
+      let lotes = proyectarInventario(vista.movimientos).lotes;
+      for (const l of lotesAjustados) lotes = agregarLote(lotes, l);
+      let producciones = 0;
+      let consumos = 0;
+      for (const p of semilla.producciones) {
+        const receta = mapaRecetas.get(p.recetaId);
+        if (!receta || receta.archivada) continue;
+        const r = producirDominio({ lotes, receta, insumos: mapaInsumos, veces: p.veces, hoy });
+        if (!r.ok) continue;
+        lotes = r.valor.lotes;
+        const nuevos = movimientosProduccion(ctx, `P-${this.nuevoId()}`, receta.id, r.valor.planes);
+        movimientos.push(...nuevos);
+        producciones += 1;
+        consumos += nuevos.length;
+      }
+
+      const resumen: ResumenCarga = {
+        insumos: insumos.length,
+        recetas: recetas.length,
+        lotes: lotesNuevos.length,
+        cotizaciones: cotizaciones.length,
+        producciones,
+        consumos,
+        total: documentos.length + movimientos.length,
+      };
+      return { documentos, movimientos, resultado: resumen };
     });
   }
 }

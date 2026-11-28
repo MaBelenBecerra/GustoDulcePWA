@@ -1,3 +1,5 @@
+import type { Rol } from './tipos';
+
 export interface UsuariaSesion {
   readonly uid: string;
   readonly correo: string | null;
@@ -102,4 +104,15 @@ export function validarRegistro(correo: string, contrasena: string, nombre: stri
 
 export function hayErrores(errores: ErroresSesion): boolean {
   return Object.values(errores).some((m) => m !== undefined);
+}
+
+export function listaAdministradoras(texto: string | undefined): string[] {
+  return (texto ?? '')
+    .split(',')
+    .map(normalizarCorreo)
+    .filter((c) => c !== '');
+}
+
+export function rolDe(correo: string | null, administradoras: readonly string[]): Rol {
+  return correo && administradoras.includes(normalizarCorreo(correo)) ? 'administradora' : 'repostera';
 }

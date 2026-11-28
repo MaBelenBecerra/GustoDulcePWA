@@ -149,27 +149,17 @@ export function calcularCostoReceta(
 }
 
 
-export function precioSugerido(costoUnitario: number, margen: number): number {
-  asegurarNoNegativo(costoUnitario, 'Costo unitario');
-  asegurarFinito(margen, 'Margen');
-  if (margen < 0 || margen >= 1) {
-    throw new ErrorDominio('MARGEN_INVALIDO', 'El margen debe cumplir 0 ≤ g < 1.');
-  }
-  return costoUnitario / (1 - margen);
-}
-
 export interface Cotizacion {
   readonly recetaId: Id;
   readonly unidades: number;
-  readonly margen: number;
   readonly costoUnitario: number;
-
-  readonly precioUnitario: number;
-
   readonly precioUnitarioComercial: number;
   readonly precioTotal: number;
-  readonly costoTotal: number;
-  readonly gananciaTotal: number;
+  readonly materiaPrima: number;
+  readonly costosIndirectos: number;
+  readonly manoDeObra: number;
+  readonly redondeo: number;
+  readonly ganancia: number;
 }
 
 export function cotizar(
@@ -177,26 +167,38 @@ export function cotizar(
   insumos: ReadonlyMap<Id, Insumo>,
   config: ConfiguracionCostos,
   unidades: number,
-  margen: number,
   pasoComercial = 0.5,
 ): Cotizacion {
   if (!Number.isInteger(unidades) || unidades < 1) {
     throw new ErrorDominio('NUMERO_INVALIDO', 'Se debe cotizar al menos 1 unidad entera.');
   }
   const costo = calcularCostoReceta(receta, insumos, config);
-  const exacto = precioSugerido(costo.unitario, margen);
-  const comercial = redondearAlAlza(exacto, pasoComercial);
+  const factor = unidades / costo.porciones;
+  const materiaPrima = redondear(costo.mpd * factor, 2);
+  const costosIndirectos = redondear(costo.cif * factor, 2);
+  const manoDeObra = redondear(costo.mod * factor, 2);
+  const comercial = redondearAlAlza(costo.unitario, pasoComercial);
   const precioTotal = redondear(comercial * unidades, 2);
-  const costoTotal = redondear(costo.unitario * unidades, 2);
+  const ganancia = redondear(precioTotal - materiaPrima - costosIndirectos, 2);
   return {
     recetaId: receta.id,
     unidades,
-    margen,
     costoUnitario: costo.unitario,
-    precioUnitario: redondear(exacto, 2),
     precioUnitarioComercial: comercial,
     precioTotal,
-    costoTotal,
-    gananciaTotal: redondear(precioTotal - costoTotal, 2),
+    materiaPrima,
+    costosIndirectos,
+    manoDeObra,
+    redondeo: redondear(ganancia - manoDeObra, 2),
+    ganancia,
   };
+}
+
+
+export function validarNombre(nombre: string, que: string): string {
+  const limpio = nombre.trim().replace(/\s+/g, ' ');
+  if (limpio.length < 2 || limpio.length > 60) {
+    throw new ErrorDominio('NOMBRE_INVALIDO', `El nombre ${que} debe tener entre 2 y 60 letras.`);
+  }
+  return limpio;
 }

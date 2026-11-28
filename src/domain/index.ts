@@ -7,3 +7,7 @@ export * from './movimientos';
 export * from './documentos';
 export * from './sesion';
 export * from './entrada';
+
+export * from './uso';
+export * from './metricas';
+export * from './whatsapp';

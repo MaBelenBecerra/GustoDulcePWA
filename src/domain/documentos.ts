@@ -1,6 +1,6 @@
 import type { Id } from './tipos';
 
-export type Coleccion = 'insumos' | 'recetas' | 'configuracion';
+export type Coleccion = 'insumos' | 'recetas' | 'configuracion' | 'cotizaciones';
 
 export interface Documento<T = unknown> {
   readonly coleccion: Coleccion;

@@ -7,6 +7,19 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == uid;
     }
 
+    // Administradora: se reconoce por su correo en el token de Firebase Auth.
+    // Para agregar otra, suma su correo a esta lista (y a VITE_ADMIN_EMAILS en .env.local).
+    function esAdmin() {
+      return request.auth != null
+        && request.auth.token.email in ['belustianabecerra@gmail.com'];
+    }
+
+    function rolValido(uid) {
+      return request.resource.data.rol == 'repostera'
+        || (request.resource.data.rol == 'administradora' && esAdmin());
+    }
+
+    // Respaldo privado de cada repostera: ni la administradora lo lee.
     match /respaldos/{uid} {
 
       match /movimientos/{movId} {
@@ -19,6 +32,19 @@ service cloud.firestore {
       match /documentos/{docId} {
         allow read, write: if duena(uid);
       }
+    }
+
+    // Perfil público con métricas agregadas (sin recetas, precios ni clientas).
+    match /perfiles/{uid} {
+      allow read: if duena(uid) || esAdmin();
+
+      allow create, update: if duena(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.demo == false
+        && rolValido(uid);
+
+      // Cuentas de demostración del panel: solo la administradora, solo con prefijo demo-.
+      allow create, update, delete: if esAdmin() && uid.matches('demo-.*');
     }
   }
 }

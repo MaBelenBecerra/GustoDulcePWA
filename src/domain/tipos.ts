@@ -67,7 +67,22 @@ export interface Receta {
   readonly minutosElaboracion: number;
 
   readonly minutosHorneado: number;
+
+  readonly archivada?: boolean;
 }
+
+
+export interface CotizacionGuardada {
+  readonly id: Id;
+  readonly recetaId: Id;
+  readonly porciones: number;
+  readonly precioTotal: number;
+  readonly cliente: string;
+  readonly fecha: FechaISO;
+}
+
+
+export type Rol = 'administradora' | 'repostera';
 
 
 export interface ServiciosMensuales {
@@ -101,7 +116,7 @@ export type CodigoError =
   | 'NUMERO_INVALIDO'
   | 'FECHA_INVALIDA'
   | 'CONFIGURACION_INVALIDA'
-  | 'MARGEN_INVALIDO'
+  | 'NOMBRE_INVALIDO'
   | 'INSUMO_INVALIDO'
   | 'INSUMO_DESCONOCIDO'
   | 'RECETA_INVALIDA'
